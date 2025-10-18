@@ -1,0 +1,14 @@
+[submodule "thirdparty/lodepng"]
+	path = thirdparty/lodepng
+	url = https://github.com/skiftOS/lodepng
+	branch=master
+
+[submodule "thirdparty/limine"]
+	path = thirdparty/limine
+	url = https://github.com/skiftOS/limine
+	branch=master
+
+[submodule "thirdparty/echfs"]
+	path = thirdparty/echfs
+	url = https://github.com/skiftOS/echfs
+	branch=master
