@@ -8,10 +8,10 @@ BINUTILS_DIRECTORY="binutils-$BINUTILS_VERSION"
 BINUTILS_FILENAME="$BINUTILS_DIRECTORY.tar.gz"
 BINUTILS_URL="http://ftp.gnu.org/gnu/binutils/$BINUTILS_FILENAME"
 
-GCC_VERSION=11.1 #used to be 10.1.0
-GCC_DIRECTORY="gcc-11.1.0"
-GCC_FILENAME="gcc-11.1.0.tar.gz"
-GCC_URL="https://ftp.gnu.org/gnu/gcc/gcc-11.1.0/gcc-11.1.0.tar.gz"
+GCC_VERSION=10.1.0 #used to be 10.1.0   https://ftp.gnu.org/gnu/gcc/gcc-10.1.0/gcc-10.1.0.tar.gz
+GCC_DIRECTORY="gcc-10.1.0"
+GCC_FILENAME="gcc-10.1.0.tar.gz"
+GCC_URL="https://ftp.gnu.org/gnu/gcc/gcc-10.1.0/gcc-10.1.0.tar.gz"
 
 # ---------------------------------------------------------------------------- #
 
