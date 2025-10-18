@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
@@ -22,7 +22,7 @@ jobs:
           git submodule update --init --recursive
 
       - name: Cache cross-toolchain
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         env:
           cache-name: cache-cross-toolchain
         with:
@@ -40,14 +40,14 @@ jobs:
       - name: Building skiftOS (x86_32)
         run: |
           make clean
-          make all CONFIG=release CONFIG_LOADER=grub
-          make all CONFIG=release CONFIG_LOADER=limine
+          make distro CONFIG=release CONFIG_LOADER=grub
+          make distro CONFIG=release CONFIG_LOADER=limine
           echo "RELEASE_TAG=$(date +'%y.%W')" >> $GITHUB_ENV
 
       - name: Building skiftOS (x86_64)
         run: |
           make clean
-          make all CONFIG=release CONFIG_ARCH=x86_64 CONFIG_LOADER=limine
+          make distro CONFIG=release CONFIG_ARCH=x86_64 CONFIG_LOADER=limine
           echo "RELEASE_TAG=$(date +'%y.%W')" >> $GITHUB_ENV
 
       - name: Creating Release
@@ -58,7 +58,7 @@ jobs:
         with:
           tag_name: v${{ env.RELEASE_TAG  }}
           release_name: ${{ env.RELEASE_TAG }}
-          body_path: manual/release.md
+          body_path: .github/release.md
           draft: false
           prerelease: false
 
@@ -69,8 +69,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: disks/bootdisk-grub-x86_32.img
-          asset_name: bootdisk-grub-x86_32.img
+          asset_path: build/disks/skift-x86_32-grub-release.img.gz
+          asset_name: skift-x86_32-grub.img.gz
           asset_content_type: application/x-ima
 
       - name: Upload release assets (limine-x86_32)
@@ -80,8 +80,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: disks/bootdisk-limine-x86_32.img
-          asset_name: bootdisk-limine-x86_32.img
+          asset_path: build/disks/skift-x86_32-limine-release.img.gz
+          asset_name: skift-x86_32-limine.img.gz
           asset_content_type: application/x-ima
 
       - name: Upload release assets (limine-x86_64)
@@ -91,6 +91,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: disks/bootdisk-limine-x86_64.img
-          asset_name: bootdisk-limine-x86_64.img
+          asset_path: build/disks/skift-x86_64-limine-release.img.gz
+          asset_name: skift-x86_64-limine.img.gz
           asset_content_type: application/x-ima
