@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Installing dependencies
         run: |
@@ -53,7 +53,7 @@ jobs:
           make all CONFIG=release CONFIG_ARCH=x86_64 CONFIG_LOADER=limine
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: disks
           path: disks/
