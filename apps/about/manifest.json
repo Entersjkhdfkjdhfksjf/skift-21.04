@@ -1,6 +1,6 @@
 {
     "name": "About",
-    "comment": "About the skift operating system.",
+    "comment": "About SkiftOS Longhorn",
     "icon": "information",
     "command": "about"
 }
