@@ -3,5 +3,6 @@
 
     <Container padding="insets(8, 0)" layout="stack()" fill>
         <Label text="Thanks for choosing skiftOS!" anchor="center"/>
+        <Label text="INTERNAL TESTING BUILD - LH" anchor="center"/>
     </Container>
 </Container>
