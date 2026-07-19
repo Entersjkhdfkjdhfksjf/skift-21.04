@@ -1,0 +1,40 @@
+name: Build skiftOS Release 
+
+on:
+  workflow_dispatch: # This ensures the workflow only runs manually
+
+jobs:
+  build:
+    name: Build and Upload Artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          # Installing general build requirements and testing tools
+          sudo apt-get install -y nasm gcc make binutils grub-pc-bin qemu-system-x86 xorriso mtools imagemagick
+          # Installing toolchain specific requirements
+          sudo apt-get install -y build-essential bison flex libgmp3-dev libmpc-dev libmpfr-dev texinfo
+
+      - name: Build the toolchain
+        run: |
+          # Ensuring the script is executable
+          chmod +x toolchain/build-it.sh
+          ./toolchain/build-it.sh
+
+      - name: Build skiftOS
+        run: make release 
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skiftOS-iso
+          path: "/home/runner/work/skift-21.04/skift-21.04/disks/bootdisk-grub-x86_32.img"
+          if-no-files-found: warn
+          
