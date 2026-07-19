@@ -57,7 +57,7 @@ int main(int argc, char const *argv[])
 
     if (argc == 1 || option_kernel_name || option_all)
     {
-        printf("%s ", info.kernel_name);
+        printf("%s ", info.kernel_name, "Longhorn");
     }
 
     if (option_nodename || option_all)
@@ -67,7 +67,7 @@ int main(int argc, char const *argv[])
 
     if (option_kernel_release || option_all)
     {
-        printf("%s ", info.kernel_release);
+        printf("%s ", info.kernel_release, "Longhorn");
     }
 
     if (option_kernel_version || option_all)
