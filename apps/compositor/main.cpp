@@ -142,7 +142,7 @@ int main(int argc, char const *argv[])
 
     if (strcmp(__CONFIG__, "develop") == 0)
     {
-        //process_run("terminal", nullptr);
+        
         process_run("onboarding", nullptr);
     }
     else
