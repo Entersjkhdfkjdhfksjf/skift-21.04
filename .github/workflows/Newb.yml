@@ -35,6 +35,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: skiftOS-iso
-          path: "*.iso"
+          path: "/home/runner/work/skift-21.04/skift-21.04/disks/bootdisk-grub-x86_32.img"
           if-no-files-found: warn
           
