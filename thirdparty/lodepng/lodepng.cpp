@@ -119,7 +119,6 @@ to something as fast. */
 
 static void lodepng_memcpy(void* LODEPNG_RESTRICT dst,
                            const void* LODEPNG_RESTRICT src, size_t size) {
-  size_t i;
   memcpy(dst, src, size);
 }
 
