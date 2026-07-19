@@ -119,7 +119,8 @@ to something as fast. */
 
 static void lodepng_memcpy(void* LODEPNG_RESTRICT dst,
                            const void* LODEPNG_RESTRICT src, size_t size) {
-  size_t i;
+  // At line 123 in lodepng.cpp, add bounds checking:
+if(size > 0 && size < (1U << 31)) {  // Sanity check size
   for(i = 0; i < size; i++) ((char*)dst)[i] = ((const char*)src)[i];
 }
 
