@@ -1,0 +1,6 @@
+{
+    "name": "STARTUP-OS-LH",
+    "comment": "STARTUP",
+    "icon": "information",
+    "command": "splash-screen"
+}
