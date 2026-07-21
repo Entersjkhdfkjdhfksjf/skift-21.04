@@ -94,7 +94,7 @@ public:
         {
             handle_message(result_or_message.value());
 
-            auto result_or_message = receive();
+            result_or_message = receive();
         }
 
         return result_or_message;
