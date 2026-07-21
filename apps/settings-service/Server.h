@@ -67,8 +67,12 @@ public:
 
             for (size_t i = 0; i < _clients.count(); i++)
             {
-                if (_clients[i] != &client &&
-                    _clients[i]->is_subscribe(*message.path))
+                // Notify every subscriber, including the client that made
+                // the write itself — otherwise a process that writes a
+                // setting it also watches never sees its own change
+                // reflected (e.g. an app re-theming its own windows after
+                // it changes the theme).
+                if (_clients[i]->is_subscribe(*message.path))
                 {
                     Message m;
 
