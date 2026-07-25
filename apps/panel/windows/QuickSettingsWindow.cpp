@@ -58,13 +58,13 @@ QuickSettingsWindow::QuickSettingsWindow()
 
     auto themes = new Container(root());
     themes->flags(Widget::FILL);
-    themes->layout(GRID(2, 3, 6, 6));
+    themes->layout(HFLOW(6));
 
-    _theme_skift_dark = new Button(themes, Button::OUTLINE, "Skift Dark");
-    _theme_skift_light = new Button(themes, Button::OUTLINE, "Skift Light");
-    _theme_ayu_dark = new Button(themes, Button::OUTLINE, "Ayu Dark");
-    _theme_ayu_light = new Button(themes, Button::OUTLINE, "Ayu Light");
-    _theme_solarized_dark = new Button(themes, Button::OUTLINE, "Solarized Dark");
+    _theme_dark = new Button(themes, Button::OUTLINE, "Dark");
+    _theme_dark->flags(Widget::FILL);
+
+    _theme_light = new Button(themes, Button::OUTLINE, "Light");
+    _theme_light->flags(Widget::FILL);
 
     auto bind_theme_button = [](Button *button, const char *theme_name) {
         button->on(Event::ACTION, [theme_name](auto) {
@@ -72,11 +72,8 @@ QuickSettingsWindow::QuickSettingsWindow()
         });
     };
 
-    bind_theme_button(_theme_skift_dark, "skift-dark");
-    bind_theme_button(_theme_skift_light, "skift-light");
-    bind_theme_button(_theme_ayu_dark, "ayu-dark");
-    bind_theme_button(_theme_ayu_light, "ayu-light");
-    bind_theme_button(_theme_solarized_dark, "solarized-dark");
+    bind_theme_button(_theme_dark, "dark");
+    bind_theme_button(_theme_light, "light");
 
     _theme_setting = own<settings::Setting>(THEME_SETTING_PATH, [this](const json::Value &value) {
         update_theme_buttons(value.as_string());
@@ -122,15 +119,8 @@ void QuickSettingsWindow::layout_window()
 
 void QuickSettingsWindow::update_theme_buttons(const String &active_theme)
 {
-    auto set_active = [&](Button *button, const char *theme_name) {
-        button->style(active_theme == theme_name ? Button::FILLED : Button::OUTLINE);
-    };
-
-    set_active(_theme_skift_dark, "skift-dark");
-    set_active(_theme_skift_light, "skift-light");
-    set_active(_theme_ayu_dark, "ayu-dark");
-    set_active(_theme_ayu_light, "ayu-light");
-    set_active(_theme_solarized_dark, "solarized-dark");
+    _theme_dark->style(active_theme == "dark" ? Button::FILLED : Button::OUTLINE);
+    _theme_light->style(active_theme == "light" ? Button::FILLED : Button::OUTLINE);
 }
 
 } // namespace panel
