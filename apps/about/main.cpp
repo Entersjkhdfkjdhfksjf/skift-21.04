@@ -27,7 +27,7 @@ int main(int argc, char **argv)
 
     window->with_widget<Label>("version-label", [&](auto label) {
         //label->text(__BUILD_VERSION__);
-        label->text("SkiftOS Longhorn");
+        label->text("AmberOS Longhorn");
     });
 
     window->with_widget<Label>("commit-label", [&](auto label) {
