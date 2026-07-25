@@ -95,7 +95,7 @@ AppearancePage::AppearancePage(Widget *parent, MainWindow *)
 
         String path = entry.path;
         button->on(Event::ACTION, [path](auto) {
-            settings::write(settings::Path::parse(WALLPAPER_SETTING_PATH), path);
+            settings::write(settings::Path::parse(WALLPAPER_SETTING_PATH), path.cstring());
         });
     }
 
