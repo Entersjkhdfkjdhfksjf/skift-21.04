@@ -18,11 +18,8 @@ public:
 private:
     Button *_wireframe_button = nullptr;
 
-    Button *_theme_skift_dark = nullptr;
-    Button *_theme_skift_light = nullptr;
-    Button *_theme_ayu_dark = nullptr;
-    Button *_theme_ayu_light = nullptr;
-    Button *_theme_solarized_dark = nullptr;
+    Button *_theme_dark = nullptr;
+    Button *_theme_light = nullptr;
 
     OwnPtr<settings::Setting> _wireframe_setting;
     OwnPtr<settings::Setting> _theme_setting;
