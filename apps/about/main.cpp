@@ -27,12 +27,12 @@ int main(int argc, char **argv)
 
     window->with_widget<Label>("version-label", [&](auto label) {
         //label->text(__BUILD_VERSION__);
-        label->text("AmberOS Longhorn");
+        label->text("Development");
     });
 
     window->with_widget<Label>("commit-label", [&](auto label) {
       //  label->text(__BUILD_GITREF__ "/" __BUILD_CONFIG__);
-        label->text("Longhorn" "/" "x86_64");
+        label->text("AmberOS");
     });
 
     window->with_widget<Button>("license-button", [&](auto button) {
