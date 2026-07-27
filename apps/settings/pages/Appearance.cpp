@@ -9,6 +9,7 @@ namespace settings
 
 static constexpr const char *WIREFRAME_SETTING_PATH = "appearance:widgets.wireframe";
 static constexpr const char *THEME_SETTING_PATH = "appearance:widgets.theme";
+static constexpr const char *TRANSPARENCY_SETTING_PATH = "appearance:widgets.transparency";
 static constexpr const char *WALLPAPER_SETTING_PATH = "appearance:wallpaper.image";
 
 // {file path, display label} — labels are deliberately generic rather than
@@ -79,6 +80,33 @@ AppearancePage::AppearancePage(Widget *parent, MainWindow *)
 
     new Separator(this);
 
+    /* --- Transparency ----------------------------------------------------------- */
+
+    new Label(this, "Transparency");
+
+    auto transparency = new Container(this);
+    transparency->layout(HFLOW(8));
+
+    _transparency_none = new Button(transparency, Button::OUTLINE, "None");
+    _transparency_slight = new Button(transparency, Button::OUTLINE, "Slight");
+    _transparency_full = new Button(transparency, Button::OUTLINE, "Full");
+
+    auto bind_transparency_button = [](Button *button, const char *mode_name) {
+        button->on(Event::ACTION, [mode_name](auto) {
+            settings::write(settings::Path::parse(TRANSPARENCY_SETTING_PATH), mode_name);
+        });
+    };
+
+    bind_transparency_button(_transparency_none, "none");
+    bind_transparency_button(_transparency_slight, "slight");
+    bind_transparency_button(_transparency_full, "full");
+
+    _transparency_setting = own<settings::Setting>(TRANSPARENCY_SETTING_PATH, [this](const json::Value &value) {
+        update_transparency_buttons(value.as_string());
+    });
+
+    new Separator(this);
+
     /* --- Wallpaper ------------------------------------------------------------- */
 
     new Label(this, "Wallpaper");
@@ -108,6 +136,13 @@ void AppearancePage::update_theme_buttons(const String &active_theme)
 {
     _theme_dark->style(active_theme == "dark" ? Button::FILLED : Button::OUTLINE);
     _theme_light->style(active_theme == "light" ? Button::FILLED : Button::OUTLINE);
+}
+
+void AppearancePage::update_transparency_buttons(const String &active_mode)
+{
+    _transparency_none->style(active_mode == "none" ? Button::FILLED : Button::OUTLINE);
+    _transparency_slight->style(active_mode == "slight" ? Button::FILLED : Button::OUTLINE);
+    _transparency_full->style(active_mode == "full" ? Button::FILLED : Button::OUTLINE);
 }
 
 void AppearancePage::update_wallpaper_buttons(const String &active_wallpaper)
