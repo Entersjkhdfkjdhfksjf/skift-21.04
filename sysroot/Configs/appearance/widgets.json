@@ -1,4 +1,5 @@
 {
     "theme": "light",
-    "wireframe": false
+    "wireframe": false,
+    "transparency": "slight"
 }
