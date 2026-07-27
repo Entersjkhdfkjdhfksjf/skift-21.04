@@ -3,6 +3,19 @@
 #include <libwidget/Button.h>
 #include <libwidget/IconPanel.h>
 #include <libwidget/Label.h>
+#include <libwidget/Theme.h>
+
+// Filled buttons draw the accent color as their background and used to
+// always draw white text/icon on top of it. That's unreadable on themes
+// with a light/bright accent (e.g. the Ayu-derived Dark theme's amber
+// #E6B450 accent) since white-on-amber has very low contrast. Instead we
+// pick whichever of black/white actually contrasts with the accent color,
+// using perceived luminance (ITU-R BT.601) rather than a hardcoded color.
+static Color accent_contrast_color(Color accent)
+{
+    double luminance = (0.299 * accent.red() + 0.587 * accent.green() + 0.114 * accent.blue()) / 255.0;
+    return luminance > 0.6 ? Colors::BLACK : Colors::WHITE;
+}
 
 void Button::paint(Painter &painter, const Recti &rectangle)
 {
@@ -94,7 +107,7 @@ Button::Button(Widget *parent, Style style, RefPtr<Icon> icon)
 
     if (style == FILLED)
     {
-        icon_panel->color(THEME_FOREGROUND, Colors::WHITE);
+        icon_panel->color(THEME_FOREGROUND, accent_contrast_color(theme_get_color(THEME_ACCENT)));
     }
 }
 
@@ -108,7 +121,7 @@ Button::Button(Widget *parent, Style style, String text)
     auto label = new Label(this, text, Anchor::CENTER);
     if (style == FILLED)
     {
-        label->color(THEME_FOREGROUND, Colors::WHITE);
+        label->color(THEME_FOREGROUND, accent_contrast_color(theme_get_color(THEME_ACCENT)));
     }
 }
 
@@ -125,7 +138,7 @@ Button::Button(Widget *parent, Style style, RefPtr<Icon> icon, String text)
 
     if (style == FILLED)
     {
-        label->color(THEME_FOREGROUND, Colors::WHITE);
-        icon_panel->color(THEME_FOREGROUND, Colors::WHITE);
+        label->color(THEME_FOREGROUND, accent_contrast_color(theme_get_color(THEME_ACCENT)));
+        icon_panel->color(THEME_FOREGROUND, accent_contrast_color(theme_get_color(THEME_ACCENT)));
     }
 }
