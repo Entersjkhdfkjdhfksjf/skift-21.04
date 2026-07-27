@@ -12,5 +12,7 @@ public:
 
     ~TitleBar() override;
 
+    void paint(Painter &painter, const Recti &rectangle) override;
+
     void event(Event *event) override;
 };
