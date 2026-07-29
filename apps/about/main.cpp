@@ -9,8 +9,8 @@
 
 static auto logo_based_on_color_scheme()
 {
-    auto path = theme_is_dark() ? "/Applications/about/logo-white.png"
-                                : "/Applications/about/logo-black.png";
+    auto path = theme_is_dark() ? "/Applications/about/logo.png"
+                                : "/Applications/about/logo.png";
 
     return Bitmap::load_from_or_placeholder(path);
 }
