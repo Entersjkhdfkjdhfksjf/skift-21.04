@@ -31,6 +31,7 @@ static const struct
     {"/Files/Wallpapers/skift-light.png", "Gradient (Light)"},
     {"/Files/Wallpapers/light.png", "Pale"},
     {"/Files/Wallpapers/devse-chan.png", "Devse-chan"},
+    {"/Files/Wallpapers/amber.png", "Amber"},
 };
 
 AppearancePage::AppearancePage(Widget *parent, MainWindow *)
