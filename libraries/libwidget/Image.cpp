@@ -32,7 +32,6 @@ void Image::paint(Painter &painter, const Recti &)
     }
 
     Recti destination = bound();
-    bool needs_scaling = false;
 
     if (_scalling == ImageScalling::CENTER)
     {
@@ -41,7 +40,6 @@ void Image::paint(Painter &painter, const Recti &)
     else if (_scalling == ImageScalling::STRETCH)
     {
         destination = bound();
-        needs_scaling = true;
     }
     else if (_scalling == ImageScalling::FIT)
     {
@@ -67,18 +65,12 @@ void Image::paint(Painter &painter, const Recti &)
 
             destination = Recti(scaled_size).centered_within(bound());
         }
-
-        needs_scaling = true;
     }
 
-    if (needs_scaling)
-    {
-        painter.blit_scaled(*_bitmap, _bitmap->bound(), destination);
-    }
-    else
-    {
-        painter.blit(*_bitmap, _bitmap->bound(), destination);
-    }
+    // blit() dispatches internally between a fast 1:1 copy and a scaled
+    // copy depending on whether source/destination sizes match, so every
+    // mode just goes through it — no need to pick a variant ourselves.
+    painter.blit(*_bitmap, _bitmap->bound(), destination);
 }
 
 Vec2i Image::size()
