@@ -32,6 +32,7 @@ void Image::paint(Painter &painter, const Recti &)
     }
 
     Recti destination = bound();
+    bool needs_scaling = false;
 
     if (_scalling == ImageScalling::CENTER)
     {
@@ -40,9 +41,44 @@ void Image::paint(Painter &painter, const Recti &)
     else if (_scalling == ImageScalling::STRETCH)
     {
         destination = bound();
+        needs_scaling = true;
+    }
+    else if (_scalling == ImageScalling::FIT)
+    {
+        // Scale-to-contain: fit the whole image inside our bound while
+        // preserving aspect ratio, then center the result. This is what
+        // CENTER should probably have been doing all along for anything
+        // that isn't guaranteed to already be the right pixel size (like
+        // the About window's logo, which broke the moment someone dropped
+        // in a larger image — CENTER doesn't scale at all, it just clips).
+        Vec2i bitmap_size = _bitmap->bound().size();
+        Vec2i widget_size = bound().size();
+
+        if (bitmap_size.x() > 0 && bitmap_size.y() > 0)
+        {
+            double scale_x = (double)widget_size.x() / (double)bitmap_size.x();
+            double scale_y = (double)widget_size.y() / (double)bitmap_size.y();
+            double scale = scale_x < scale_y ? scale_x : scale_y;
+
+            Vec2i scaled_size = {
+                (int)(bitmap_size.x() * scale),
+                (int)(bitmap_size.y() * scale),
+            };
+
+            destination = Recti(scaled_size).centered_within(bound());
+        }
+
+        needs_scaling = true;
     }
 
-    painter.blit(*_bitmap, _bitmap->bound(), destination);
+    if (needs_scaling)
+    {
+        painter.blit_scaled(*_bitmap, _bitmap->bound(), destination);
+    }
+    else
+    {
+        painter.blit(*_bitmap, _bitmap->bound(), destination);
+    }
 }
 
 Vec2i Image::size()
