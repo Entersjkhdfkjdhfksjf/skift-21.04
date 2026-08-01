@@ -39,7 +39,7 @@ PanelWindow::PanelWindow()
     (new Separator(root()))->color(THEME_BORDER, Colors::BLACK.with_alpha(0.25));
 
     auto menu = new Button(container, Button::TEXT, Icon::get("Panelicon"), "Applications");
-    menu->on(Event::ACTION, [this](auto) {
+    menu->on(Event::ACTION, [this](auto) 
         _menu->show();
     });
 
