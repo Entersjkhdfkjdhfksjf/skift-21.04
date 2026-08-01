@@ -29,8 +29,7 @@ jobs:
           ./toolchain/build-it.sh
 
       - name: Build skiftOS
-        run: make all CONFIG_OPTIMISATIONS="-O3"
-        
+        run: make release CONFIG_OPTIMISATIONS="-O3"
 
       - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4

@@ -282,16 +282,16 @@ Result hj_filesystem_rename(const char *raw_old_path, size_t old_size,
 
 Result hj_system_info(SystemInfo *info)
 {
-    strncpy(info->kernel_name, "hjert", SYSTEM_INFO_FIELD_SIZE);
+    strncpy(info->kernel_name, "amkern", SYSTEM_INFO_FIELD_SIZE);
 
     strncpy(info->kernel_release, __BUILD_VERSION__, SYSTEM_INFO_FIELD_SIZE);
 
     strncpy(info->kernel_build, __BUILD_GITREF__, SYSTEM_INFO_FIELD_SIZE);
 
-    strlcpy(info->system_name, "skift", SYSTEM_INFO_FIELD_SIZE);
+    strlcpy(info->system_name, "amberOS", SYSTEM_INFO_FIELD_SIZE);
 
     // FIXME: this should not be hard coded.
-    strlcpy(info->machine, "machine", SYSTEM_INFO_FIELD_SIZE);
+    strlcpy(info->machine, "amber machine", SYSTEM_INFO_FIELD_SIZE);
 
     return SUCCESS;
 }

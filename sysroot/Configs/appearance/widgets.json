@@ -1,4 +1,5 @@
 {
-    "theme": "skift-dark",
-    "wireframe": false
+    "theme": "light",
+    "wireframe": false,
+    "transparency": "slight"
 }

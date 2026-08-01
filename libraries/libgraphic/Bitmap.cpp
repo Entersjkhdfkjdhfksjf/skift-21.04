@@ -24,7 +24,26 @@ static Color _placeholder_buffer[] = {
 ResultOr<RefPtr<Bitmap>> Bitmap::create_shared(int width, int height)
 {
     Color *pixels = nullptr;
-    Result result = memory_alloc(width * height * sizeof(Color), reinterpret_cast<uintptr_t *>(&pixels));
+
+    // memory_alloc() maps straight down to the kernel's page allocator,
+    // which hard-asserts that the requested size is already page aligned
+    // (kernel/memory/Memory.cpp: assert(IS_PAGE_ALIGN(size))). A failed
+    // kernel assertion panics the *entire system*, not just this process.
+    //
+    // width*height*sizeof(Color) is essentially never an exact multiple
+    // of the page size for arbitrary dimensions — it only happens to be
+    // for a handful of "nice" resolutions (1920x1080 among them, which is
+    // why screen resolution and some existing wallpapers/icons never
+    // tripped this). Without rounding up here, loading almost any other
+    // real-world image size — through the image viewer, a new wallpaper,
+    // a new logo, anything — panics the kernel instead of just failing
+    // that one image load.
+    static constexpr size_t PAGE_SIZE = 4096;
+
+    size_t requested_size = (size_t)width * (size_t)height * sizeof(Color);
+    size_t aligned_size = (requested_size + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1);
+
+    Result result = memory_alloc(aligned_size, reinterpret_cast<uintptr_t *>(&pixels));
 
     if (result != SUCCESS)
     {

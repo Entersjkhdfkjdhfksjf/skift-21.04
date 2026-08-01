@@ -6,6 +6,7 @@ enum class ImageScalling
 {
     CENTER,
     STRETCH,
+    FIT,
 };
 
 class Image : public Widget

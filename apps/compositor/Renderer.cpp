@@ -1,4 +1,6 @@
 #include <libgraphic/Framebuffer.h>
+#include <libsettings/Setting.h>
+#include <libutils/OwnPtr.h>
 #include <libutils/Vector.h>
 
 #include "compositor/Cursor.h"
@@ -8,15 +10,88 @@
 
 #include "compositor/model/Wallpaper.h"
 
+enum TransparencyMode
+{
+    TRANSPARENCY_NONE,
+    TRANSPARENCY_SLIGHT,
+    TRANSPARENCY_FULL,
+};
+
 static OwnPtr<Framebuffer> _framebuffer;
 static OwnPtr<compositor::Wallpaper> _wallpaper;
 
 static Vector<Recti> _dirty_regions;
 
+static TransparencyMode _transparency_mode = TRANSPARENCY_SLIGHT;
+static OwnPtr<settings::Setting> _setting_transparency;
+
+// The mode a window is *actually* composited with, as opposed to the flags
+// it was created with. Regular windows never set WINDOW_ACRYLIC/TRANSPARENT
+// themselves — those are only used by popovers (quick settings, the app
+// launcher, etc). Whether the desktop as a whole looks blurred is a global
+// user preference layered on top here:
+//
+//  - none:   nobody gets blur, even popovers that asked for it.
+//  - slight: popovers keep their existing full-window blur. Every other
+//            window additionally gets WINDOW_TRANSPARENT so that its own
+//            (mostly opaque) content composites over a blurred backdrop —
+//            in practice this only shows through wherever the app itself
+//            draws with partial alpha, i.e. just its TitleBar.
+//  - full:   every window, regardless of type, is fully acrylic.
+static WindowFlag effective_flags(Window *window)
+{
+    WindowFlag flags = window->flags();
+
+    switch (_transparency_mode)
+    {
+    case TRANSPARENCY_NONE:
+        flags &= ~(WindowFlag)(WINDOW_ACRYLIC | WINDOW_TRANSPARENT);
+        break;
+
+    case TRANSPARENCY_FULL:
+        flags |= WINDOW_ACRYLIC | WINDOW_TRANSPARENT;
+        break;
+
+    case TRANSPARENCY_SLIGHT:
+    default:
+        if (window->type() != WINDOW_TYPE_DESKTOP)
+        {
+            flags |= WINDOW_TRANSPARENT;
+
+            if (window->type() == WINDOW_TYPE_REGULAR)
+            {
+                flags |= WINDOW_ACRYLIC;
+            }
+        }
+        break;
+    }
+
+    return flags;
+}
+
 void renderer_initialize()
 {
     _framebuffer = Framebuffer::open().take_value();
     _wallpaper = own<compositor::Wallpaper>(_framebuffer->resolution().size());
+
+    _setting_transparency = own<settings::Setting>("appearance:widgets.transparency", [](auto &value) {
+        auto mode_name = value.as_string();
+
+        if (mode_name == "none")
+        {
+            _transparency_mode = TRANSPARENCY_NONE;
+        }
+        else if (mode_name == "full")
+        {
+            _transparency_mode = TRANSPARENCY_FULL;
+        }
+        else
+        {
+            _transparency_mode = TRANSPARENCY_SLIGHT;
+        }
+
+        renderer_region_dirty(renderer_bound());
+    });
 
     renderer_region_dirty(_framebuffer->resolution());
 }
@@ -85,7 +160,7 @@ void renderer_composite_region(Recti region, Window *window_transparent)
                 destination.position() - window->bound().position(),
                 destination.size());
 
-            if (window->flags() & WINDOW_ACRYLIC)
+            if (effective_flags(window) & WINDOW_ACRYLIC)
             {
                 _framebuffer->painter().blit_no_alpha(_wallpaper->acrylic(), destination, destination);
             }
@@ -117,12 +192,14 @@ void renderer_region(Recti region)
                 destination.position() - window->bound().position(),
                 destination.size());
 
-            if (window->flags() & WINDOW_TRANSPARENT)
+            WindowFlag flags = effective_flags(window);
+
+            if (flags & WINDOW_TRANSPARENT)
             {
                 renderer_composite_region(destination, window);
                 _framebuffer->painter().blit(window->frontbuffer(), source, destination);
             }
-            else if (window->flags() & WINDOW_ACRYLIC)
+            else if (flags & WINDOW_ACRYLIC)
             {
                 _framebuffer->painter().blit_no_alpha(_wallpaper->acrylic(), region, region);
                 _framebuffer->painter().blit(window->frontbuffer(), source, destination);

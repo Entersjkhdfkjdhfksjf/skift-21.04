@@ -20,6 +20,14 @@ private:
     Style _style = TEXT;
 
 public:
+    Style style() const { return _style; }
+
+    void style(Style style)
+    {
+        _style = style;
+        should_repaint();
+    }
+
     Button(Widget *parent, Style style);
 
     Button(Widget *parent, Style style, RefPtr<Icon> icon);

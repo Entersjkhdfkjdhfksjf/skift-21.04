@@ -52,5 +52,5 @@ ElapsedTime system_get_uptime()
 void system_initialize()
 {
     _system_boot_timestamp = arch_get_time();
-    logger_info("hjert - " __BUILD_GITREF__);
+    logger_info("amkern - " __BUILD_GITREF__);
 }

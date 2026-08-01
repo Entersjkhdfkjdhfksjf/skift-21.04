@@ -9,8 +9,8 @@
 
 static auto logo_based_on_color_scheme()
 {
-    auto path = theme_is_dark() ? "/Applications/about/logo-white.png"
-                                : "/Applications/about/logo-black.png";
+    auto path = theme_is_dark() ? "/Applications/about/logo.png"
+                                : "/Applications/about/logo.png";
 
     return Bitmap::load_from_or_placeholder(path);
 }
@@ -23,14 +23,17 @@ int main(int argc, char **argv)
 
     window->with_widget<Image>("system-image", [&](auto image) {
         image->change_bitmap(logo_based_on_color_scheme());
+        image->change_scaling(ImageScalling::FIT);
     });
 
     window->with_widget<Label>("version-label", [&](auto label) {
-        label->text(__BUILD_VERSION__);
+        //label->text(__BUILD_VERSION__);
+        label->text("AmberOS Longhorn");
     });
 
     window->with_widget<Label>("commit-label", [&](auto label) {
-        label->text(__BUILD_GITREF__ "/" __BUILD_CONFIG__);
+      //  label->text(__BUILD_GITREF__ "/" __BUILD_CONFIG__);
+        label->text("Longhorn" "/" "x86_64");
     });
 
     window->with_widget<Button>("license-button", [&](auto button) {

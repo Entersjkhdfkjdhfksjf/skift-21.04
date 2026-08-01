@@ -5,10 +5,12 @@
 namespace settings
 {
 
+class MainWindow;
+
 class HomePage : public Container
 {
 public:
-    HomePage(Widget *parent);
+    HomePage(Widget *parent, MainWindow *window);
 };
 
 } // namespace settings

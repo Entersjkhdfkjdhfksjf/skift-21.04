@@ -44,6 +44,18 @@ TitleBar::~TitleBar()
 {
 }
 
+void TitleBar::paint(Painter &painter, const Recti &rectangle)
+{
+    __unused(rectangle);
+
+    // Deliberately drawn with alpha rather than a solid fill: when the
+    // compositor's "slight" transparency mode composites this window over
+    // a blurred backdrop, only pixels with alpha < 1.0 actually reveal
+    // that blur. The rest of a regular window's content stays fully
+    // opaque, so this is the only place blur shows through in that mode.
+    painter.fill_rectangle(bound(), color(THEME_MIDDLEGROUND).with_alpha(0.72));
+}
+
 void TitleBar::event(Event *event)
 {
     __unused(event);
