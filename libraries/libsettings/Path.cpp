@@ -71,7 +71,7 @@ bool Path::match(const Path &other) const
 bool Path::operator==(const Path &other)
 {
     return domain == other.domain &&
-           bundle == other.domain &&
+           bundle == other.bundle &&
            key == other.key;
 }
 
