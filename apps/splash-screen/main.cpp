@@ -1,9 +1,7 @@
 #include <libgraphic/Framebuffer.h>
 #include <libsystem/process/Process.h>
 
-static const auto BACKGROUND = Color::from_hex(0x18181B);
-static const auto PROGRESS = Color::from_hex(0x0066ff);
-static const auto REMAINING = Color::from_hex(0x444444);
+static const auto BACKGROUND = Colors::BLACK;
 
 // The halo is a soft radial glow, bigger than the badge itself, so it can
 // bloom out around it. Both sizes come from how halo-strip.png/logo.png
@@ -11,7 +9,17 @@ static const auto REMAINING = Color::from_hex(0x444444);
 static constexpr int HALO_SIZE = 400;
 static constexpr int BADGE_SIZE = 340;
 static constexpr int BADGE_OFFSET = (HALO_SIZE - BADGE_SIZE) / 2;
-static constexpr int HALO_FRAME_COUNT = 16;
+static constexpr int HALO_FRAME_COUNT = 24;
+
+// process_sleep() takes raw kernel ticks (PIT is initialized at 1000Hz, so
+// nominally ~1 tick/ms), not a fixed wall-clock unit -- and how long that
+// actually takes in practice depends on the host (real hardware vs QEMU
+// timer emulation overhead, etc). These two constants are the only things
+// that need tuning to change total splash duration and perceived
+// smoothness -- lower TICKS_PER_FRAME for smoother/faster, raise
+// TOTAL_FRAMES for a longer wait without changing the pacing.
+static constexpr int TICKS_PER_FRAME = 2;
+static constexpr int TOTAL_FRAMES = 40;
 
 int main(int argc, char **argv)
 {
@@ -28,7 +36,6 @@ int main(int argc, char **argv)
     auto framebuffer = framebuffer_or_result.take_value();
 
     auto logo = Bitmap::load_from_or_placeholder("/Applications/splash-screen/logo.png");
-    auto cat = Bitmap::load_from_or_placeholder("/Applications/splash-screen/cat.png");
     auto halo_strip = Bitmap::load_from_or_placeholder("/Applications/splash-screen/halo-strip.png");
 
     auto halo_container = Recti(0, 0, HALO_SIZE, HALO_SIZE).centered_within(framebuffer->resolution());
@@ -36,17 +43,13 @@ int main(int argc, char **argv)
         halo_container.position() + Vec2i(BADGE_OFFSET, BADGE_OFFSET),
         Vec2i(BADGE_SIZE, BADGE_SIZE));
 
-    auto loading_container = Recti(0, 0, halo_container.width() * 0.9, 4)
-                                 .centered_within(framebuffer->resolution())
-                                 .offset(Vec2i(0, halo_container.height() / 2 + 40));
-
     auto &painter = framebuffer->painter();
 
     painter.clear(BACKGROUND);
     framebuffer->mark_dirty_all();
     framebuffer->blit();
 
-    for (size_t i = 0; i <= 100; i++)
+    for (int i = 0; i < TOTAL_FRAMES; i++)
     {
         int halo_frame = i % HALO_FRAME_COUNT;
         Recti halo_source(halo_frame * HALO_SIZE, 0, HALO_SIZE, HALO_SIZE);
@@ -55,28 +58,10 @@ int main(int argc, char **argv)
         painter.blit(*halo_strip, halo_source, halo_container);
         painter.blit(*logo, logo->bound(), badge_destination);
 
-        painter.clear(loading_container, REMAINING);
-
-        Recti progress = loading_container.take_left(loading_container.width() * (i / 100.0));
-
-        if (argc == 2 && strcmp(argv[1], "--nyan") == 0)
-        {
-            auto color = Color::from_hsv((int)(360 * (i / 100.0) * 2) % 360, 0.5, 1);
-
-            painter.clear(progress, color);
-            painter.blit(*cat, cat->bound(), cat->bound().moved(progress.top_right() + Vec2i(-4, -2 - 8)));
-        }
-        else
-        {
-            painter.clear(progress, PROGRESS);
-            painter.fill_rectangle(progress.take_right(1), REMAINING);
-        }
-
         framebuffer->mark_dirty(halo_container);
-        framebuffer->mark_dirty(loading_container.expended(Insetsi(16)));
         framebuffer->blit();
 
-        process_sleep(5);
+        process_sleep(TICKS_PER_FRAME);
     }
 
     return 0;
