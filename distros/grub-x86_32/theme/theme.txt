@@ -1,0 +1,50 @@
+# AmberOS GRUB theme
+#
+# The background image already contains the full wordmark/logo
+# composition, so the default title bar is disabled to avoid a redundant
+# duplicate heading -- the boot menu is positioned in the lower portion
+# of the screen, below the artwork.
+
+title-text: ""
+desktop-image: "background.png"
+desktop-color: "#0d1017"
+terminal-font: "amber-16.pf2"
+
++ boot_menu {
+    left = 12%
+    top = 62%
+    width = 76%
+    height = 26%
+
+    item_font = "amber-16.pf2"
+    selected_item_font = "amber-16.pf2"
+
+    item_color = "#bfbdb6"
+    selected_item_color = "#e6b450"
+
+    item_height = 36
+    item_padding = 8
+    item_spacing = 6
+    item_icon_space = 10
+
+    icon_width = 0
+    icon_height = 0
+}
+
++ progress_bar {
+    id = "__timeout__"
+    left = 12%
+    top = 90%
+    width = 76%
+    height = 18
+
+    font = "amber-16.pf2"
+    text_color = "#bfbdb6"
+
+    fg_color = "#e6b450"
+    bg_color = "#1b1f29"
+    border_color = "#5a637842"
+
+    show_text = true
+    text = "@TIMEOUT_NOTIFICATION_MIDDLE@"
+}
