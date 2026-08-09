@@ -18,6 +18,7 @@
 #include "kernel/node/DevicesInfo.h"
 #include "kernel/node/ProcessInfo.h"
 #include "kernel/scheduling/Scheduler.h"
+#include "kernel/system/CowSelfTest.h"
 #include "kernel/system/System.h"
 #include "kernel/tasking/Tasking.h"
 #include "kernel/tasking/Userspace.h"
@@ -41,6 +42,16 @@ void system_main(Handover *handover)
     splash_screen();
     system_initialize();
     memory_initialize(handover);
+
+    // Temporary -- verifies the copy-on-write primitive (Physical.h's
+    // refcounting + Memory.h's memory_handle_cow_fault()) actually works
+    // before anything else depends on it. Needs to run here: after paging
+    // is up (memory_initialize()) but it doesn't need tasking/scheduling
+    // at all, since it exercises memory_handle_cow_fault() directly
+    // rather than through a real task's page fault. See CowSelfTest.h for
+    // why this is meant to be deleted later, once Stage 2 has real
+    // coverage of the same mechanism through actual usage.
+    cow_self_test();
 
     scheduler_initialize();
     tasking_initialize();
