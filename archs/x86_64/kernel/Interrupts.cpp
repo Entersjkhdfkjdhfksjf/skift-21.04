@@ -4,6 +4,7 @@
 
 #include "kernel/interrupts/Dispatcher.h"
 #include "kernel/interrupts/Interupts.h"
+#include "kernel/memory/Memory.h"
 #include "kernel/scheduling/Scheduler.h"
 #include "kernel/system/System.h"
 #include "kernel/tasking/Syscalls.h"
@@ -58,25 +59,22 @@ extern "C" uint32_t interrupts_handler(uintptr_t esp, InterruptStackFrame stackf
     if (stackframe.intno < 32)
     {
         if (stackframe.intno == 14 &&
+            stackframe.cs == 0x1B &&
             (stackframe.err & (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE)) == (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE))
         {
             // A write to a page that IS mapped but isn't writable -- the
-            // exact shape every copy-on-write fault will have. There's no
-            // COW primitive installed yet to actually resolve one (right
-            // now the only way a page ever ends up read-only at all is a
-            // direct, manual arch_virtual_protect() call for testing this
-            // exact branch) -- so for now this only makes that case
-            // distinctly diagnosable before falling through to the exact
-            // same handling as any other exception, unchanged.
-            //
-            // This is the insertion point for the real logic once it
-            // exists: allocate a fresh physical page, copy the old
-            // contents, remap this virtual address onto it as writable,
-            // release this task's reference on the shared original frame,
-            // and return esp here instead of falling through -- for the
-            // userspace case specifically, replacing the cancel(-1) below
-            // with an actual resolution.
-            logger_warn("Page fault: write to read-only page at %08x (no COW handler installed yet)", CR2());
+            // exact shape a copy-on-write fault has. Only attempted for
+            // userspace faults (cs == 0x1B); a kernel-mode write to a
+            // read-only page is always a real bug, never a COW page --
+            // the kernel itself never touches user COW mappings directly.
+            if (memory_handle_cow_fault(scheduler_running()->address_space, CR2()))
+            {
+                // Resolved -- the faulting instruction is safe to
+                // re-execute as-is, so return here rather than falling
+                // through to the exception handling below.
+                pic_ack(stackframe.intno);
+                return esp;
+            }
         }
 
         if (stackframe.cs == 0x1B)
