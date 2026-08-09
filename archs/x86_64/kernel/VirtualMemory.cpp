@@ -1,198 +1,163 @@
 #include <libsystem/Logger.h>
+#include <libsystem/core/CString.h>
+#include <libsystem/io/Stream.h>
+
+#include "archs/VirtualMemory.h"
+#include "archs/x86_64/kernel/Paging.h"
 
 #include "kernel/interrupts/Interupts.h"
 #include "kernel/memory/Memory.h"
+#include "kernel/memory/Physical.h"
 #include "kernel/system/System.h"
 
-#include "archs/VirtualMemory.h"
-
-#include "archs/x86_64/kernel/Paging.h"
-#include "archs/x86_64/kernel/x86_64.h"
-
-PageMappingLevel4 kpml4 __aligned(ARCH_PAGE_SIZE) = {};
-PageMappingLevel3 kpml3 __aligned(ARCH_PAGE_SIZE) = {};
-
-PageMappingLevel2 kpml2 __aligned(ARCH_PAGE_SIZE) = {};
-PageMappingLevel1 kpml1[512] __aligned(ARCH_PAGE_SIZE) = {};
-
-void *arch_kernel_address_space()
-{
-    return &kpml4;
-}
+PageDirectory _kernel_page_directory __aligned(ARCH_PAGE_SIZE) = {};
+PageTable _kernel_page_tables[256] __aligned(ARCH_PAGE_SIZE) = {};
 
 void arch_virtual_initialize()
 {
-    auto &pml4_entry = kpml4.entries[0];
-    pml4_entry.user = 0;
-    pml4_entry.writable = 1;
-    pml4_entry.present = 1;
-    pml4_entry.physical_address = (uint64_t)&kpml3 / ARCH_PAGE_SIZE;
-
-    auto &pml3_entry = kpml3.entries[0];
-    pml3_entry.user = 0;
-    pml3_entry.writable = 1;
-    pml3_entry.present = 1;
-    pml3_entry.physical_address = (uint64_t)&kpml2 / ARCH_PAGE_SIZE;
-
-    for (size_t i = 0; i < 512; i++)
+    // Setup the kernel pagedirectory.
+    for (size_t i = 0; i < 256; i++)
     {
-        auto &pml2_entry = kpml2.entries[i];
-        pml2_entry.user = 0;
-        pml2_entry.writable = 1;
-        pml2_entry.present = 1;
-        pml2_entry.physical_address = (uint64_t)&kpml1[i] / ARCH_PAGE_SIZE;
+        PageDirectoryEntry *entry = &_kernel_page_directory.entries[i];
+        entry->User = 0;
+        entry->Write = 1;
+        entry->Present = 1;
+        entry->PageFrameNumber = (size_t)&_kernel_page_tables[i] / ARCH_PAGE_SIZE;
     }
 }
 
 void arch_virtual_memory_enable()
 {
-    arch_address_space_switch(arch_kernel_address_space());
+    paging_enable();
+}
+
+void *arch_kernel_address_space()
+{
+    return &_kernel_page_directory;
 }
 
 bool arch_virtual_present(void *address_space, uintptr_t virtual_address)
 {
     ASSERT_INTERRUPTS_RETAINED();
 
-    auto pml4 = reinterpret_cast<PageMappingLevel4 *>(address_space);
-    auto &pml4_entry = pml4->entries[pml4_index(virtual_address)];
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
 
-    if (!pml4_entry.present)
+    int page_directory_index = PAGE_DIRECTORY_INDEX(virtual_address);
+    PageDirectoryEntry &page_directory_entry = page_directory->entries[page_directory_index];
+
+    if (!page_directory_entry.Present)
     {
         return false;
     }
 
-    auto pml3 = reinterpret_cast<PageMappingLevel3 *>(pml4_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml3_entry = pml3->entries[pml3_index(virtual_address)];
+    PageTable &page_table = *reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
 
-    if (!pml3_entry.present)
-    {
-        return false;
-    }
+    int page_table_index = PAGE_TABLE_INDEX(virtual_address);
+    PageTableEntry &page_table_entry = page_table.entries[page_table_index];
 
-    auto pml2 = reinterpret_cast<PageMappingLevel2 *>(pml3_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml2_entry = pml2->entries[pml2_index(virtual_address)];
-
-    if (!pml2_entry.present)
-    {
-        return false;
-    }
-
-    auto pml1 = reinterpret_cast<PageMappingLevel1 *>(pml2_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml1_entry = pml1->entries[pml1_index(virtual_address)];
-
-    return pml1_entry.present;
+    return page_table_entry.Present;
 }
 
 uintptr_t arch_virtual_to_physical(void *address_space, uintptr_t virtual_address)
 {
     ASSERT_INTERRUPTS_RETAINED();
 
-    auto pml4 = reinterpret_cast<PageMappingLevel4 *>(address_space);
-    auto &pml4_entry = pml4->entries[pml4_index(virtual_address)];
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
 
-    if (!pml4_entry.present)
+    int page_directory_index = PAGE_DIRECTORY_INDEX(virtual_address);
+    PageDirectoryEntry &page_directory_entry = page_directory->entries[page_directory_index];
+
+    if (!page_directory_entry.Present)
     {
         return 0;
     }
 
-    auto pml3 = reinterpret_cast<PageMappingLevel3 *>(pml4_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml3_entry = pml3->entries[pml3_index(virtual_address)];
+    PageTable &page_table = *reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
 
-    if (!pml3_entry.present)
+    int page_table_index = PAGE_TABLE_INDEX(virtual_address);
+    PageTableEntry &page_table_entry = page_table.entries[page_table_index];
+
+    if (!page_table_entry.Present)
     {
         return 0;
     }
 
-    auto pml2 = reinterpret_cast<PageMappingLevel2 *>(pml3_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml2_entry = pml2->entries[pml2_index(virtual_address)];
-
-    if (!pml2_entry.present)
-    {
-        return 0;
-    }
-
-    auto pml1 = reinterpret_cast<PageMappingLevel1 *>(pml2_entry.physical_address * ARCH_PAGE_SIZE);
-    auto &pml1_entry = pml1->entries[pml1_index(virtual_address)];
-
-    if (!pml1_entry.present)
-    {
-        return 0;
-    }
-
-    return (pml1_entry.physical_address * ARCH_PAGE_SIZE) + (virtual_address & 0xfff);
+    return (page_table_entry.PageFrameNumber * ARCH_PAGE_SIZE) + (virtual_address & 0xfff);
 }
 
 Result arch_virtual_map(void *address_space, MemoryRange physical_range, uintptr_t virtual_address, MemoryFlags flags)
 {
     ASSERT_INTERRUPTS_RETAINED();
 
-    auto plm4 = reinterpret_cast<PageMappingLevel4 *>(address_space);
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
 
-    for (size_t i = 0; i < physical_range.page_count(); i++)
+    for (size_t i = 0; i < physical_range.size() / ARCH_PAGE_SIZE; i++)
     {
-        uint64_t address = virtual_address + i * ARCH_PAGE_SIZE;
+        size_t offset = i * ARCH_PAGE_SIZE;
 
-        auto pml4_entry = &plm4->entries[pml4_index(address)];
-        auto pml3 = reinterpret_cast<PageMappingLevel3 *>(pml4_entry->physical_address * ARCH_PAGE_SIZE);
+        int page_directory_index = PAGE_DIRECTORY_INDEX(virtual_address + offset);
+        PageDirectoryEntry &page_directory_entry = page_directory->entries[page_directory_index];
+        PageTable *page_table = reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
 
-        if (!pml4_entry->present)
+        if (!page_directory_entry.Present)
         {
-            Result alloc_result = memory_alloc_identity(address_space, MEMORY_CLEAR, (uintptr_t *)&pml3);
+            Result alloc_result = memory_alloc_identity(page_directory, MEMORY_CLEAR, (uintptr_t *)&page_table);
 
             if (alloc_result != SUCCESS)
             {
                 return alloc_result;
             }
 
-            pml4_entry->present = 1;
-            pml4_entry->writable = 1;
-            pml4_entry->user = 1;
-            pml4_entry->physical_address = (uint64_t)(pml3) / ARCH_PAGE_SIZE;
+            page_directory_entry.Present = 1;
+            page_directory_entry.Write = 1;
+            page_directory_entry.User = 1;
+            page_directory_entry.PageFrameNumber = (uint32_t)(page_table) >> 12;
         }
 
-        auto pml3_entry = &pml3->entries[pml3_index(address)];
-        auto pml2 = reinterpret_cast<PageMappingLevel2 *>(pml3_entry->physical_address * ARCH_PAGE_SIZE);
+        int page_table_index = PAGE_TABLE_INDEX(virtual_address + offset);
+        PageTableEntry &page_table_entry = page_table->entries[page_table_index];
 
-        if (!pml3_entry->present)
-        {
-            Result alloc_result = memory_alloc_identity(address_space, MEMORY_CLEAR, (uintptr_t *)&pml2);
-
-            if (alloc_result != SUCCESS)
-            {
-                return alloc_result;
-            }
-
-            pml3_entry->present = 1;
-            pml3_entry->writable = 1;
-            pml3_entry->user = 1;
-            pml3_entry->physical_address = (uint64_t)(pml2) / ARCH_PAGE_SIZE;
-        }
-
-        auto pml2_entry = &pml2->entries[pml2_index(address)];
-        auto pml1 = reinterpret_cast<PageMappingLevel1 *>(pml2_entry->physical_address * ARCH_PAGE_SIZE);
-
-        if (!pml2_entry->present)
-        {
-            Result alloc_result = memory_alloc_identity(address_space, MEMORY_CLEAR, (uintptr_t *)&pml1);
-
-            if (alloc_result != SUCCESS)
-            {
-                return alloc_result;
-            }
-
-            pml2_entry->present = 1;
-            pml2_entry->writable = 1;
-            pml2_entry->user = 1;
-            pml2_entry->physical_address = (uint64_t)(pml1) / ARCH_PAGE_SIZE;
-        }
-
-        auto pml1_entry = &pml1->entries[pml1_index(address)];
-
-        pml1_entry->present = 1;
-        pml1_entry->writable = 1;
-        pml1_entry->user = flags & MEMORY_USER;
-        pml1_entry->physical_address = (physical_range.base() + i * ARCH_PAGE_SIZE) / ARCH_PAGE_SIZE;
+        page_table_entry.Present = 1;
+        // Previously hardcoded to 1 unconditionally -- no page in this
+        // kernel had ever been mapped read-only. MEMORY_READONLY is new;
+        // omitting it keeps the old always-writable behavior, so this is
+        // not a behavior change for any existing caller.
+        page_table_entry.Write = !(flags & MEMORY_READONLY);
+        page_table_entry.User = flags & MEMORY_USER;
+        page_table_entry.PageFrameNumber = (physical_range.base() + offset) >> 12;
     }
+
+    paging_invalidate_tlb();
+
+    return SUCCESS;
+}
+
+Result arch_virtual_protect(void *address_space, uintptr_t virtual_address, MemoryFlags flags)
+{
+    ASSERT_INTERRUPTS_RETAINED();
+
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
+
+    int page_directory_index = PAGE_DIRECTORY_INDEX(virtual_address);
+    PageDirectoryEntry &page_directory_entry = page_directory->entries[page_directory_index];
+
+    if (!page_directory_entry.Present)
+    {
+        return ERR_BAD_ADDRESS;
+    }
+
+    PageTable &page_table = *reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
+
+    int page_table_index = PAGE_TABLE_INDEX(virtual_address);
+    PageTableEntry &page_table_entry = page_table.entries[page_table_index];
+
+    if (!page_table_entry.Present)
+    {
+        return ERR_BAD_ADDRESS;
+    }
+
+    page_table_entry.Write = !(flags & MEMORY_READONLY);
+    page_table_entry.User = flags & MEMORY_USER;
 
     paging_invalidate_tlb();
 
@@ -242,38 +207,29 @@ void arch_virtual_free(void *address_space, MemoryRange virtual_range)
 {
     ASSERT_INTERRUPTS_RETAINED();
 
-    for (size_t i = 0; i < virtual_range.page_count(); i++)
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
+
+    for (size_t i = 0; i < virtual_range.size() / ARCH_PAGE_SIZE; i++)
     {
-        uint64_t address = virtual_range.base() + i * ARCH_PAGE_SIZE;
+        size_t offset = i * ARCH_PAGE_SIZE;
 
-        auto plm4 = reinterpret_cast<PageMappingLevel4 *>(address_space);
-        auto pml4_entry = &plm4->entries[pml4_index(address)];
+        size_t page_directory_index = PAGE_DIRECTORY_INDEX(virtual_range.base() + offset);
+        PageDirectoryEntry *page_directory_entry = &page_directory->entries[page_directory_index];
 
-        if (!pml4_entry->present)
+        if (!page_directory_entry->Present)
         {
             continue;
         }
 
-        auto pml3 = reinterpret_cast<PageMappingLevel3 *>(pml4_entry->physical_address * ARCH_PAGE_SIZE);
-        auto pml3_entry = &pml3->entries[pml3_index(address)];
+        PageTable *page_table = (PageTable *)(page_directory_entry->PageFrameNumber * ARCH_PAGE_SIZE);
 
-        if (!pml3_entry->present)
+        size_t page_table_index = PAGE_TABLE_INDEX(virtual_range.base() + offset);
+        PageTableEntry *page_table_entry = &page_table->entries[page_table_index];
+
+        if (page_table_entry->Present)
         {
-            continue;
+            page_table_entry->as_uint = 0;
         }
-
-        auto pml2 = reinterpret_cast<PageMappingLevel2 *>(pml3_entry->physical_address * ARCH_PAGE_SIZE);
-        auto pml2_entry = &pml2->entries[pml2_index(address)];
-
-        if (!pml2_entry->present)
-        {
-            continue;
-        }
-
-        auto pml1 = reinterpret_cast<PageMappingLevel1 *>(pml2_entry->physical_address * ARCH_PAGE_SIZE);
-        auto pml1_entry = &pml1->entries[pml1_index(address)];
-
-        *pml1_entry = {};
     }
 
     paging_invalidate_tlb();
@@ -281,49 +237,72 @@ void arch_virtual_free(void *address_space, MemoryRange virtual_range)
 
 void *arch_address_space_create()
 {
-    PageMappingLevel4 *pml4;
-    memory_alloc_identity(arch_kernel_address_space(), MEMORY_CLEAR, (uintptr_t *)&pml4);
+    InterruptsRetainer retainer;
 
-    PageMappingLevel3 *pml3;
-    memory_alloc_identity(arch_kernel_address_space(), MEMORY_CLEAR, (uintptr_t *)&pml3);
+    PageDirectory *page_directory = nullptr;
 
-    auto &pml4_entry = pml4->entries[0];
-    pml4_entry.user = 1;
-    pml4_entry.writable = 1;
-    pml4_entry.present = 1;
-    pml4_entry.physical_address = (uint64_t)pml3 / ARCH_PAGE_SIZE;
-
-    PageMappingLevel2 *pml2;
-    memory_alloc_identity(arch_kernel_address_space(), MEMORY_CLEAR, (uintptr_t *)&pml2);
-
-    auto &pml3_entry = pml3->entries[0];
-    pml3_entry.user = 1;
-    pml3_entry.writable = 1;
-    pml3_entry.present = 1;
-    pml3_entry.physical_address = (uint64_t)pml2 / ARCH_PAGE_SIZE;
-
-    for (size_t i = 0; i < 512; i++)
+    if (memory_alloc(arch_kernel_address_space(), sizeof(PageDirectory), MEMORY_CLEAR, (uintptr_t *)&page_directory) != SUCCESS)
     {
-        auto &pml2_entry = pml2->entries[i];
-        pml2_entry.user = 1;
-        pml2_entry.writable = 1;
-        pml2_entry.present = 1;
-        pml2_entry.physical_address = (uint64_t)&kpml1[i] / ARCH_PAGE_SIZE;
+        logger_error("Page directory allocation failed!");
+
+        return nullptr;
     }
 
-    return pml4;
+    memset(page_directory, 0, sizeof(PageDirectory));
+
+    // Copy first gigs of virtual memory (kernel space);
+    for (size_t i = 0; i < 256; i++)
+    {
+        PageDirectoryEntry *page_directory_entry = &page_directory->entries[i];
+
+        page_directory_entry->User = 0;
+        page_directory_entry->Write = 1;
+        page_directory_entry->Present = 1;
+        page_directory_entry->PageFrameNumber = (uint32_t)&_kernel_page_tables[i] / ARCH_PAGE_SIZE;
+    }
+
+    return page_directory;
 }
 
 void arch_address_space_destroy(void *address_space)
 {
-    ASSERT_INTERRUPTS_RETAINED();
+    InterruptsRetainer retainer;
 
-    __unused(address_space);
+    assert(address_space != arch_kernel_address_space());
 
-    ASSERT_NOT_REACHED();
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
+
+    for (size_t i = 256; i < 1024; i++)
+    {
+        PageDirectoryEntry *page_directory_entry = &page_directory->entries[i];
+
+        if (page_directory_entry->Present)
+        {
+            PageTable *page_table = (PageTable *)(page_directory_entry->PageFrameNumber * ARCH_PAGE_SIZE);
+
+            for (size_t i = 0; i < 1024; i++)
+            {
+                PageTableEntry *page_table_entry = &page_table->entries[i];
+
+                if (page_table_entry->Present)
+                {
+                    uintptr_t physical_address = page_table_entry->PageFrameNumber * ARCH_PAGE_SIZE;
+
+                    MemoryRange physical_range{physical_address, ARCH_PAGE_SIZE};
+
+                    physical_free(physical_range);
+                }
+            }
+
+            memory_free(arch_kernel_address_space(), (MemoryRange){(uintptr_t)page_table, sizeof(PageTable)});
+        }
+    }
+
+    memory_free(arch_kernel_address_space(), (MemoryRange){(uintptr_t)page_directory, sizeof(PageDirectory)});
 }
 
 void arch_address_space_switch(void *address_space)
 {
-    paging_load_directory((uintptr_t)address_space);
+    InterruptsRetainer retainer;
+    paging_load_directory(arch_virtual_to_physical(arch_kernel_address_space(), (uintptr_t)address_space));
 }
