@@ -1,4 +1,3 @@
-
 #include <libsystem/Assert.h>
 #include <libsystem/Logger.h>
 #include <libsystem/core/CString.h>
@@ -239,4 +238,54 @@ Result memory_free(void *address_space, MemoryRange virtual_range)
     }
 
     return SUCCESS;
+}
+
+bool memory_handle_cow_fault(void *address_space, uintptr_t faulting_address)
+{
+    InterruptsRetainer retainer;
+
+    uintptr_t page_address = faulting_address & ~(uintptr_t)(ARCH_PAGE_SIZE - 1);
+
+    if (!arch_virtual_present(address_space, page_address))
+    {
+        // Not even mapped -- this isn't a COW fault (a genuinely missing
+        // mapping, a wild pointer, etc). Let the caller fall through to
+        // normal fault handling.
+        return false;
+    }
+
+    uintptr_t old_physical_address = arch_virtual_to_physical(address_space, page_address);
+
+    if (physical_page_refcount(old_physical_address) <= 1)
+    {
+        // Nobody else references this frame anymore (e.g. the snapshot
+        // that made it read-only was since discarded) -- no copy needed,
+        // just make the existing frame writable again in place.
+        arch_virtual_protect(address_space, page_address, MEMORY_USER);
+
+        return true;
+    }
+
+    MemoryRange new_physical_range = physical_alloc(ARCH_PAGE_SIZE);
+
+    // Briefly map the fresh physical page somewhere in kernel space so it
+    // can actually be written to, before it becomes this address's new
+    // (writable, user-mode) backing below. The OLD page's contents are
+    // still directly readable through page_address itself -- only writes
+    // were blocked, which is the entire reason this fault happened.
+    MemoryRange kernel_scratch = arch_virtual_alloc(arch_kernel_address_space(), new_physical_range, MEMORY_NONE);
+
+    memcpy((void *)kernel_scratch.base(), (void *)page_address, ARCH_PAGE_SIZE);
+
+    arch_virtual_free(arch_kernel_address_space(), kernel_scratch);
+
+    assert(SUCCESS == arch_virtual_map(address_space, new_physical_range, page_address, MEMORY_USER));
+
+    // This address space no longer points at the original frame -- release
+    // its reference. If something else (a snapshot) still holds one, the
+    // frame survives; if this was the last one, it's freed for real.
+    MemoryRange old_physical_range{old_physical_address, ARCH_PAGE_SIZE};
+    physical_free(old_physical_range);
+
+    return true;
 }
