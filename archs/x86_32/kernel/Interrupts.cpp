@@ -47,10 +47,38 @@ static const char *_exception_messages[32] = {
     "Reserved",
 };
 
+// x86 page fault error code bits (Intel SDM Vol 3A, 4.7): bit 0 set means
+// the faulting page WAS present (a protection violation, not a missing
+// mapping); bit 1 set means the access was a write.
+#define PAGE_FAULT_ERR_PRESENT (1 << 0)
+#define PAGE_FAULT_ERR_WRITE (1 << 1)
+
 extern "C" uint32_t interrupts_handler(uintptr_t esp, InterruptStackFrame stackframe)
 {
     if (stackframe.intno < 32)
     {
+        if (stackframe.intno == 14 &&
+            (stackframe.err & (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE)) == (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE))
+        {
+            // A write to a page that IS mapped but isn't writable -- the
+            // exact shape every copy-on-write fault will have. There's no
+            // COW primitive installed yet to actually resolve one (right
+            // now the only way a page ever ends up read-only at all is a
+            // direct, manual arch_virtual_protect() call for testing this
+            // exact branch) -- so for now this only makes that case
+            // distinctly diagnosable before falling through to the exact
+            // same handling as any other exception, unchanged.
+            //
+            // This is the insertion point for the real logic once it
+            // exists: allocate a fresh physical page, copy the old
+            // contents, remap this virtual address onto it as writable,
+            // release this task's reference on the shared original frame,
+            // and return esp here instead of falling through -- for the
+            // userspace case specifically, replacing the cancel(-1) below
+            // with an actual resolution.
+            logger_warn("Page fault: write to read-only page at %08x (no COW handler installed yet)", CR2());
+        }
+
         if (stackframe.cs == 0x1B)
         {
             sti();
