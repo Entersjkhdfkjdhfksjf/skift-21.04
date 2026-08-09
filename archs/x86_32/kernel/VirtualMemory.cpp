@@ -118,10 +118,46 @@ Result arch_virtual_map(void *address_space, MemoryRange physical_range, uintptr
         PageTableEntry &page_table_entry = page_table->entries[page_table_index];
 
         page_table_entry.Present = 1;
-        page_table_entry.Write = 1;
+        // Previously hardcoded to 1 unconditionally -- no page in this
+        // kernel had ever been mapped read-only. MEMORY_READONLY is new;
+        // omitting it keeps the old always-writable behavior, so this is
+        // not a behavior change for any existing caller.
+        page_table_entry.Write = !(flags & MEMORY_READONLY);
         page_table_entry.User = flags & MEMORY_USER;
         page_table_entry.PageFrameNumber = (physical_range.base() + offset) >> 12;
     }
+
+    paging_invalidate_tlb();
+
+    return SUCCESS;
+}
+
+Result arch_virtual_protect(void *address_space, uintptr_t virtual_address, MemoryFlags flags)
+{
+    ASSERT_INTERRUPTS_RETAINED();
+
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
+
+    int page_directory_index = PAGE_DIRECTORY_INDEX(virtual_address);
+    PageDirectoryEntry &page_directory_entry = page_directory->entries[page_directory_index];
+
+    if (!page_directory_entry.Present)
+    {
+        return ERR_BAD_ADDRESS;
+    }
+
+    PageTable &page_table = *reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
+
+    int page_table_index = PAGE_TABLE_INDEX(virtual_address);
+    PageTableEntry &page_table_entry = page_table.entries[page_table_index];
+
+    if (!page_table_entry.Present)
+    {
+        return ERR_BAD_ADDRESS;
+    }
+
+    page_table_entry.Write = !(flags & MEMORY_READONLY);
+    page_table_entry.User = flags & MEMORY_USER;
 
     paging_invalidate_tlb();
 
