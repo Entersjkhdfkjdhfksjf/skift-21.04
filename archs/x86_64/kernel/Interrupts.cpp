@@ -1,4 +1,6 @@
+#include <libsystem/Assert.h>
 #include <libsystem/Logger.h>
+#include <libsystem/io/Stream.h>
 
 #include "kernel/interrupts/Dispatcher.h"
 #include "kernel/interrupts/Interupts.h"
@@ -7,7 +9,6 @@
 #include "kernel/tasking/Syscalls.h"
 
 #include "archs/x86/kernel/PIC.h"
-
 #include "archs/x86_64/kernel/Interrupts.h"
 #include "archs/x86_64/kernel/x86_64.h"
 
@@ -46,50 +47,76 @@ static const char *_exception_messages[32] = {
     "Reserved",
 };
 
-extern "C" uint64_t interrupts_handler(uintptr_t rsp)
-{
-    InterruptStackFrame *stackframe = reinterpret_cast<InterruptStackFrame *>(rsp);
+// x86 page fault error code bits (Intel SDM Vol 3A, 4.7): bit 0 set means
+// the faulting page WAS present (a protection violation, not a missing
+// mapping); bit 1 set means the access was a write.
+#define PAGE_FAULT_ERR_PRESENT (1 << 0)
+#define PAGE_FAULT_ERR_WRITE (1 << 1)
 
-    if (stackframe->intno < 32)
+extern "C" uint32_t interrupts_handler(uintptr_t esp, InterruptStackFrame stackframe)
+{
+    if (stackframe.intno < 32)
     {
-        if (stackframe->cs == 0x1B)
+        if (stackframe.intno == 14 &&
+            (stackframe.err & (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE)) == (PAGE_FAULT_ERR_PRESENT | PAGE_FAULT_ERR_WRITE))
+        {
+            // A write to a page that IS mapped but isn't writable -- the
+            // exact shape every copy-on-write fault will have. There's no
+            // COW primitive installed yet to actually resolve one (right
+            // now the only way a page ever ends up read-only at all is a
+            // direct, manual arch_virtual_protect() call for testing this
+            // exact branch) -- so for now this only makes that case
+            // distinctly diagnosable before falling through to the exact
+            // same handling as any other exception, unchanged.
+            //
+            // This is the insertion point for the real logic once it
+            // exists: allocate a fresh physical page, copy the old
+            // contents, remap this virtual address onto it as writable,
+            // release this task's reference on the shared original frame,
+            // and return esp here instead of falling through -- for the
+            // userspace case specifically, replacing the cancel(-1) below
+            // with an actual resolution.
+            logger_warn("Page fault: write to read-only page at %08x (no COW handler installed yet)", CR2());
+        }
+
+        if (stackframe.cs == 0x1B)
         {
             sti();
 
             logger_error("Task %s(%d) triggered an exception: '%s' %x.%x (IP=%08x CR2=%08x)",
                          scheduler_running()->name,
                          scheduler_running_id(),
-                         _exception_messages[stackframe->intno],
-                         stackframe->intno,
-                         stackframe->err,
-                         stackframe->rip,
+                         _exception_messages[stackframe.intno],
+                         stackframe.intno,
+                         stackframe.err,
+                         stackframe.eip,
                          CR2());
 
             task_dump(scheduler_running());
-            arch_dump_stack_frame(stackframe);
+            arch_dump_stack_frame(reinterpret_cast<void *>(&stackframe));
 
             scheduler_running()->cancel(-1);
         }
         else
         {
             system_panic_with_context(
-                stackframe,
+                &stackframe,
                 "CPU EXCEPTION: '%s' (INT:%d ERR:%x) !",
-                _exception_messages[stackframe->intno],
-                stackframe->intno,
-                stackframe->err);
+                _exception_messages[stackframe.intno],
+                stackframe.intno,
+                stackframe.err);
         }
     }
-    else if (stackframe->intno < 48)
+    else if (stackframe.intno < 48)
     {
         interrupts_disable_holding();
 
-        int irq = stackframe->intno - 32;
+        int irq = stackframe.intno - 32;
 
         if (irq == 0)
         {
             system_tick();
-            rsp = schedule(rsp);
+            esp = schedule(esp);
         }
         else
         {
@@ -98,30 +125,41 @@ extern "C" uint64_t interrupts_handler(uintptr_t rsp)
 
         interrupts_enable_holding();
     }
-    else if (stackframe->intno == 127)
+    else if (stackframe.intno == 127)
     {
         interrupts_disable_holding();
 
-        rsp = schedule(rsp);
+        esp = schedule(esp);
 
         interrupts_enable_holding();
     }
-    else if (stackframe->intno == 128)
+    else if (stackframe.intno == 128)
     {
         sti();
 
-        stackframe->rax = task_do_syscall(
-            (Syscall)stackframe->rax,
-            stackframe->rbx,
-            stackframe->rcx,
-            stackframe->rdx,
-            stackframe->rsi,
-            stackframe->rdi);
+        if (stackframe.eax == HJ_PROCESS_CLONE)
+        {
+            InterruptsRetainer retainer;
+
+            auto usf = ((UserInterruptStackFrame *)&stackframe);
+
+            *((int *)stackframe.ebx) = 0;
+
+            auto child = task_clone(scheduler_running(), usf->user_esp, usf->eip);
+
+            *((int *)stackframe.ebx) = child->id;
+
+            stackframe.eax = SUCCESS;
+        }
+        else
+        {
+            stackframe.eax = task_do_syscall((Syscall)stackframe.eax, stackframe.ebx, stackframe.ecx, stackframe.edx, stackframe.esi, stackframe.edi);
+        }
 
         cli();
     }
 
-    pic_ack(stackframe->intno);
+    pic_ack(stackframe.intno);
 
-    return rsp;
+    return esp;
 }
