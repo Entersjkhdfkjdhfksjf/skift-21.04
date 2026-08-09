@@ -1,4 +1,5 @@
 #include <libgraphic/Framebuffer.h>
+#include <libsystem/Time.h>
 #include <libsystem/process/Process.h>
 
 static const auto BACKGROUND = Colors::BLACK;
@@ -29,12 +30,17 @@ static constexpr float BREATHE_CURVE[BREATHE_FRAME_COUNT] = {
     0.4868f, 0.4709f, 0.4594f, 0.4524f, 0.4500f, 0.4524f, 0.4594f, 0.4709f,
     0.4868f, 0.5068f, 0.5305f, 0.5576f, 0.5875f, 0.6198f, 0.6538f, 0.6891f};
 
-// Only these two need tuning to change total splash duration and pacing --
-// process_sleep() takes raw kernel ticks (~1ms nominally at 1000Hz), but
-// actual wall-clock time depends on the host (QEMU timer emulation
-// overhead, etc), so this is meant to be tuned by feel, not calculated.
-static constexpr int TICKS_PER_FRAME = 1;
-static constexpr int TOTAL_FRAMES = 96;
+// process_sleep() takes raw kernel ticks, and how long a tick actually
+// takes in wall-clock terms turned out not to be reliable in practice
+// (QEMU/emulator timer overhead, presumably) -- a fixed frame count times
+// a fixed tick count doesn't reliably produce a fixed real duration. So
+// instead of guessing at that conversion, the loop below is driven by
+// timestamp_now() (whole seconds, backed by the real hardware clock) and
+// just keeps animating until SPLASH_DURATION_SECONDS of *actual* wall
+// time have passed, however many frames that ends up being.
+static constexpr int SPLASH_DURATION_SECONDS = 7;
+static constexpr int TICKS_PER_FRAME = 1; // paces animation smoothness only, not total duration
+static constexpr int MAX_FRAMES = 5000;   // safety cap in case the clock ever doesn't advance
 
 int main(int argc, char **argv)
 {
@@ -67,8 +73,15 @@ int main(int argc, char **argv)
     framebuffer->mark_dirty_all();
     framebuffer->blit();
 
-    for (int i = 0; i < TOTAL_FRAMES; i++)
+    TimeStamp start_time = timestamp_now();
+
+    for (int i = 0; i < MAX_FRAMES; i++)
     {
+        if ((int)(timestamp_now() - start_time) >= SPLASH_DURATION_SECONDS)
+        {
+            break;
+        }
+
         float intensity = BREATHE_CURVE[i % BREATHE_FRAME_COUNT];
 
         painter.clear(halo_container, BACKGROUND);
