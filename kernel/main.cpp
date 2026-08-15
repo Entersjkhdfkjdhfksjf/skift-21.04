@@ -37,44 +37,30 @@ static void splash_screen()
     stream_format(log_stream, "\n");
 }
 
-// Temporary -- pauses boot for a few real seconds so a message printed
-// just before this is called actually has time to be read before more
-// boot logging scrolls it away (the early console has no scrollback).
-// Needs interrupts already enabled (system_get_tick() only advances once
-// the PIT's IRQ0 is actually firing) -- that's why this is only safe to
-// call after interrupts_initialize(), not before.
-static void pause_for_seconds(int seconds)
-{
-    uint32_t until = system_get_tick() + (seconds * 1000);
-
-    while (system_get_tick() < until)
-    {
-    }
-}
-
 void system_main(Handover *handover)
 {
     splash_screen();
     system_initialize();
     memory_initialize(handover);
 
-    scheduler_initialize();
-    tasking_initialize();
-    interrupts_initialize();
-
     // Temporary -- verifies the copy-on-write primitive (Physical.h's
     // refcounting + Memory.h's memory_handle_cow_fault()) actually works
-    // before anything else depends on it. Needs to run after
-    // interrupts_initialize() specifically, so pause_for_seconds() below
-    // can rely on system_get_tick() actually advancing. See
-    // CowSelfTest.h for why this (and the banner/pause around it) is
-    // meant to be deleted later, once Stage 2 has real coverage of the
-    // same mechanism through actual usage.
+    // before anything else depends on it. No artificial pause here on
+    // purpose, after two failed attempts at one (tick-based timing
+    // exposed this region to live scheduler preemption; a raw spin loop
+    // had an uncalibratable duration under emulation and appeared to
+    // hang) -- guessing at a third delay isn't worth the risk. Screen-
+    // record boot instead of trying to read this live; the banner makes
+    // it easy to find when scrubbing through afterward. See CowSelfTest.h
+    // for why this is meant to be deleted later, once Stage 2 has real
+    // coverage of the same mechanism through actual usage.
     stream_format(log_stream, "\n\n\e[33;1m==================== COW SELF-TEST ====================\e[0m\n");
     cow_self_test();
     stream_format(log_stream, "\e[33;1m========================================================\e[0m\n\n");
-    pause_for_seconds(5);
 
+    scheduler_initialize();
+    tasking_initialize();
+    interrupts_initialize();
     filesystem_initialize();
     modules_initialize(handover);
     driver_initialize();
