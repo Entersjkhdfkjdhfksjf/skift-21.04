@@ -235,6 +235,61 @@ void arch_virtual_free(void *address_space, MemoryRange virtual_range)
     paging_invalidate_tlb();
 }
 
+void arch_virtual_for_each_present_page(
+    void *address_space,
+    uintptr_t start,
+    uintptr_t end,
+    void (*callback)(void *context, uintptr_t virtual_address, uintptr_t physical_address, bool writable),
+    void *context)
+{
+    ASSERT_INTERRUPTS_RETAINED();
+
+    assert(start < end);
+
+    auto page_directory = reinterpret_cast<PageDirectory *>(address_space);
+
+    size_t first_directory_index = PAGE_DIRECTORY_INDEX(start);
+    size_t last_directory_index = PAGE_DIRECTORY_INDEX(end - 1);
+
+    for (size_t directory_index = first_directory_index; directory_index <= last_directory_index; directory_index++)
+    {
+        PageDirectoryEntry &page_directory_entry = page_directory->entries[directory_index];
+
+        if (!page_directory_entry.Present)
+        {
+            // Whole 4MiB region unmapped -- skip straight to the next
+            // page directory entry instead of probing 1024 individual
+            // page table slots that can't possibly be present.
+            continue;
+        }
+
+        PageTable &page_table = *reinterpret_cast<PageTable *>(page_directory_entry.PageFrameNumber * ARCH_PAGE_SIZE);
+
+        for (size_t table_index = 0; table_index < PAGE_TABLE_ENTRY_COUNT; table_index++)
+        {
+            PageTableEntry &page_table_entry = page_table.entries[table_index];
+
+            if (!page_table_entry.Present)
+            {
+                continue;
+            }
+
+            uintptr_t virtual_address = (directory_index << 22) | (table_index << 12);
+
+            if (virtual_address < start || virtual_address >= end)
+            {
+                // Only relevant for the first/last directory entry when
+                // start/end don't fall on a 4MiB boundary.
+                continue;
+            }
+
+            uintptr_t physical_address = page_table_entry.PageFrameNumber * ARCH_PAGE_SIZE;
+
+            callback(context, virtual_address, physical_address, page_table_entry.Write);
+        }
+    }
+}
+
 void *arch_address_space_create()
 {
     InterruptsRetainer retainer;
