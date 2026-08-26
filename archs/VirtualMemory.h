@@ -31,6 +31,23 @@ MemoryRange arch_virtual_alloc(void *address_space, MemoryRange physical_range, 
 
 void arch_virtual_free(void *address_space, MemoryRange virtual_range);
 
+// Calls callback once for every currently PRESENT page whose virtual
+// address falls within [start, end) in address_space, passing the page's
+// virtual address, its physical address, and whether it's currently
+// writable.
+//
+// Skips whole not-present page-directory regions (4MiB at a time on
+// x86_32) rather than probing every possible page address individually
+// via arch_virtual_present() in a loop -- callers walking a large,
+// mostly-sparse range (like a task's entire user address space) should
+// prefer this over doing that themselves.
+void arch_virtual_for_each_present_page(
+    void *address_space,
+    uintptr_t start,
+    uintptr_t end,
+    void (*callback)(void *context, uintptr_t virtual_address, uintptr_t physical_address, bool writable),
+    void *context);
+
 void *arch_address_space_create();
 
 void arch_address_space_destroy(void *address_space);
