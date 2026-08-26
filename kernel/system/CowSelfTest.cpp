@@ -5,6 +5,7 @@
 
 #include "kernel/memory/Memory.h"
 #include "kernel/memory/Physical.h"
+#include "kernel/memory/Snapshot.h"
 #include "kernel/system/CowSelfTest.h"
 
 void cow_self_test()
@@ -79,8 +80,53 @@ void cow_self_test()
 
     logger_info("[COW self-test] unshared-page fast path: PASS");
 
+    /* --- Test 3: whole-address-space marking (the page-table walker) --- */
+
+    // Allocate USER-flagged pages: arch_virtual_alloc() picks the search
+    // range from the flags, not from which address space object is
+    // passed in, so these land in the user address range that
+    // memory_mark_address_space_cow() actually walks, even though this
+    // is still, structurally, the kernel's own address space.
+    uintptr_t user_page_1 = 0, user_page_2 = 0;
+    assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &user_page_1));
+    assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &user_page_2));
+
+    *((volatile uint32_t *)user_page_1) = 0x11111111;
+    *((volatile uint32_t *)user_page_2) = 0x22222222;
+
+    uintptr_t user_physical_1 = arch_virtual_to_physical(address_space, user_page_1);
+    uintptr_t user_physical_2 = arch_virtual_to_physical(address_space, user_page_2);
+
+    size_t marked = memory_mark_address_space_cow(address_space);
+
+    // At least the two pages just allocated should have been marked --
+    // ">=" rather than "==" since other user-range pages may already
+    // exist at this point in boot for unrelated reasons, and this test
+    // doesn't need to know about those to check its own two pages worked.
+    assert(marked >= 2);
+
+    assert(physical_page_refcount(user_physical_1) == 2);
+    assert(physical_page_refcount(user_physical_2) == 2);
+
+    // Both should now be read-only -- confirm by resolving a COW fault on
+    // each and checking a real copy happens, same shape as Test 1.
+    assert(memory_handle_cow_fault(address_space, user_page_1));
+    assert(memory_handle_cow_fault(address_space, user_page_2));
+
+    assert(arch_virtual_to_physical(address_space, user_page_1) != user_physical_1);
+    assert(arch_virtual_to_physical(address_space, user_page_2) != user_physical_2);
+
+    *((volatile uint32_t *)user_page_1) = 0x33333333;
+    *((volatile uint32_t *)user_page_2) = 0x44444444;
+    assert(*((volatile uint32_t *)user_page_1) == 0x33333333);
+    assert(*((volatile uint32_t *)user_page_2) == 0x44444444);
+
+    logger_info("[COW self-test] whole-address-space marking: PASS");
+
     memory_free(address_space, MemoryRange{test_address, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{test_address_2, ARCH_PAGE_SIZE});
+    memory_free(address_space, MemoryRange{user_page_1, ARCH_PAGE_SIZE});
+    memory_free(address_space, MemoryRange{user_page_2, ARCH_PAGE_SIZE});
 
     logger_info("[COW self-test] ALL TESTS PASSED");
 }
