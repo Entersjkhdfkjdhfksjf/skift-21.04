@@ -147,11 +147,61 @@ void cow_self_test()
 
     logger_info("[COW self-test] snapshot_take/snapshot_destroy: PASS");
 
+    /* --- Test 5: snapshot_restore() actually reverts memory ------------- */
+
+    uintptr_t restore_page = 0;
+    assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &restore_page));
+    *((volatile uint32_t *)restore_page) = 0x77777777;
+
+    uintptr_t restore_physical = arch_virtual_to_physical(address_space, restore_page);
+
+    Snapshot *restore_snapshot = snapshot_take(address_space);
+
+    // Diverge the live mapping away from the snapshot.
+    assert(memory_handle_cow_fault(address_space, restore_page));
+    *((volatile uint32_t *)restore_page) = 0x88888888;
+    assert(*((volatile uint32_t *)restore_page) == 0x88888888);
+    assert(arch_virtual_to_physical(address_space, restore_page) != restore_physical);
+
+    // Allocate a page AFTER the snapshot -- restore should drop it.
+    uintptr_t after_page = 0;
+    assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &after_page));
+    *((volatile uint32_t *)after_page) = 0x99999999;
+    assert(arch_virtual_present(address_space, after_page));
+
+    snapshot_restore(restore_snapshot);
+
+    // The diverged page is back to its snapshot frame and value.
+    assert(arch_virtual_to_physical(address_space, restore_page) == restore_physical);
+    assert(*((volatile uint32_t *)restore_page) == 0x77777777);
+
+    // The page allocated after the snapshot is gone.
+    assert(!arch_virtual_present(address_space, after_page));
+
+    // Restored state is COW-protected again: writing triggers a real
+    // copy rather than silently corrupting the snapshot's own frame.
+    assert(memory_handle_cow_fault(address_space, restore_page));
+    *((volatile uint32_t *)restore_page) = 0xABABABAB;
+    assert(*((volatile uint32_t *)restore_page) == 0xABABABAB);
+
+    // ...and the snapshot survived that write intact, so it could be
+    // restored again.
+    MemoryRange restore_check_range{restore_physical, ARCH_PAGE_SIZE};
+    MemoryRange restore_scratch = arch_virtual_alloc(address_space, restore_check_range, MEMORY_NONE);
+    uint32_t restore_snapshot_value = *((volatile uint32_t *)restore_scratch.base());
+    arch_virtual_free(address_space, restore_scratch);
+    assert(restore_snapshot_value == 0x77777777);
+
+    snapshot_destroy(restore_snapshot);
+
+    logger_info("[COW self-test] snapshot_restore: PASS");
+
     memory_free(address_space, MemoryRange{test_address, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{test_address_2, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{user_page_1, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{user_page_2, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{snap_page, ARCH_PAGE_SIZE});
+    memory_free(address_space, MemoryRange{restore_page, ARCH_PAGE_SIZE});
 
     logger_info("[COW self-test] ALL TESTS PASSED");
 }
