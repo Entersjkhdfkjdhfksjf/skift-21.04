@@ -1,64 +1,134 @@
-#pragma once
+#include <libsystem/Assert.h>
 
-#include <libsystem/Common.h>
-#include <libsystem/Time.h>
-#include <libsystem/utils/List.h>
+#include "archs/Architectures.h"
+#include "archs/VirtualMemory.h"
 
-// One page's record within a Snapshot: which virtual address pointed at
-// which physical frame at the moment the snapshot was taken. This is the
-// piece that was missing before -- memory_mark_address_space_cow() makes
-// it SAFE for a snapshot to exist, but doesn't remember anything; a
-// Snapshot's page list is what actually makes restoration possible later
-// (restoration itself isn't built yet -- this is the data it will need
-// once it is).
-struct SnapshotPageEntry
+#include "kernel/interrupts/Interupts.h"
+#include "kernel/memory/Physical.h"
+#include "kernel/memory/Snapshot.h"
+
+// Matches arch_virtual_alloc()'s own user-memory range (see
+// archs/x86_32/kernel/VirtualMemory.cpp): page indices 256*1024 to
+// 1024*1024, i.e. the upper 3GiB.
+//
+// The true exclusive end of that range is page index 1024*1024, which as
+// an address is exactly 2^32 -- not representable in a 32-bit uintptr_t
+// (it silently wraps to 0). Using 0xFFFFFFFF here instead of that
+// unrepresentable value still walks the very last page correctly: the
+// walker's own bounds check is virtual_address >= end, and the last
+// valid page starts at 0xFFFFF000, which is still < 0xFFFFFFFF.
+#define USER_MEMORY_START ((uintptr_t)256u * 1024u * ARCH_PAGE_SIZE)
+#define USER_MEMORY_END ((uintptr_t)0xFFFFFFFF)
+
+// Shared by both memory_mark_address_space_cow() and snapshot_take():
+// retain a reference on this physical frame, and if it's currently
+// writable, make it read-only so a future write has to go through
+// memory_handle_cow_fault(). An already-read-only page (an earlier call
+// already COW-shared it) still gets an additional reference here rather
+// than being skipped -- a future write has to correctly satisfy every
+// outstanding reference, not just the most recent one.
+static void mark_single_page_cow(void *address_space, uintptr_t virtual_address, uintptr_t physical_address, bool writable)
 {
-    uintptr_t virtual_address;
-    uintptr_t physical_address;
-};
+    if (writable)
+    {
+        Result result = arch_virtual_protect(address_space, virtual_address, MEMORY_USER | MEMORY_READONLY);
+        assert(result == SUCCESS);
+    }
 
-struct Snapshot
+    physical_page_retain(physical_address);
+}
+
+/* --- memory_mark_address_space_cow() -------------------------------------- */
+
+struct MarkCowContext
 {
-    int id;
-    TimeStamp taken_at;
     void *address_space;
-    List *pages; // List<SnapshotPageEntry*>
+    size_t pages_marked;
 };
 
-// Marks every currently-writable, present page in address_space's user
-// region as copy-on-write (same underlying mechanism as
-// memory_mark_address_space_cow()) AND records each one's
-// {virtual_address, physical_address} pair, so this snapshot can (once
-// restoration exists) actually be restored -- unlike
-// memory_mark_address_space_cow() alone, which makes it safe for
-// something else to reference these pages without recording what that
-// something else would need in order to ever be restored.
-//
-// Never returns nullptr; an address space with no present user pages yet
-// just produces a Snapshot with an empty page list, which is valid, not
-// an error.
-Snapshot *snapshot_take(void *address_space);
+static void mark_page_cow_callback(void *raw_context, uintptr_t virtual_address, uintptr_t physical_address, bool writable)
+{
+    auto context = reinterpret_cast<MarkCowContext *>(raw_context);
 
-// Releases this snapshot's reference on every physical frame it
-// recorded and frees the Snapshot itself. Does not touch the live
-// address space's mappings at all -- only gives up this snapshot's own
-// claim on the frames it was keeping alive. If nothing else references a
-// given frame anymore, it becomes available for reuse; if the live
-// mapping (or another snapshot) still does, it survives.
-void snapshot_destroy(Snapshot *snapshot);
+    mark_single_page_cow(context->address_space, virtual_address, physical_address, writable);
 
-// Marks every currently-writable, present page in address_space's user
-// region as copy-on-write: retains an extra reference
-// (physical_page_retain()) on each physical frame and marks writable
-// ones read-only (arch_virtual_protect()), so the next write to any of
-// them transparently triggers memory_handle_cow_fault() instead of
-// corrupting whatever this call was meant to protect.
-//
-// Lower-level than snapshot_take() -- doesn't record anything, so there's
-// no way to know afterward which pages were marked, or restore them.
-// Kept for cow_self_test()'s existing coverage of the marking mechanism
-// in isolation; snapshot_take() is what anything building real
-// snapshot/restore functionality should actually use.
-//
-// Returns the number of pages marked. 0 is a valid result, not an error.
-size_t memory_mark_address_space_cow(void *address_space);
+    context->pages_marked++;
+}
+
+size_t memory_mark_address_space_cow(void *address_space)
+{
+    ASSERT_INTERRUPTS_RETAINED();
+
+    MarkCowContext context{address_space, 0};
+
+    arch_virtual_for_each_present_page(
+        address_space,
+        USER_MEMORY_START,
+        USER_MEMORY_END,
+        mark_page_cow_callback,
+        &context);
+
+    return context.pages_marked;
+}
+
+/* --- snapshot_take() / snapshot_destroy() ---------------------------------- */
+
+static int _next_snapshot_id = 1;
+
+struct SnapshotBuildContext
+{
+    void *address_space;
+    List *pages;
+};
+
+static void record_and_mark_page_callback(void *raw_context, uintptr_t virtual_address, uintptr_t physical_address, bool writable)
+{
+    auto context = reinterpret_cast<SnapshotBuildContext *>(raw_context);
+
+    mark_single_page_cow(context->address_space, virtual_address, physical_address, writable);
+
+    auto entry = new SnapshotPageEntry{virtual_address, physical_address};
+    list_pushback(context->pages, entry);
+}
+
+Snapshot *snapshot_take(void *address_space)
+{
+    ASSERT_INTERRUPTS_RETAINED();
+
+    auto snapshot = new Snapshot{};
+    snapshot->id = _next_snapshot_id++;
+    snapshot->taken_at = arch_get_time();
+    snapshot->address_space = address_space;
+    snapshot->pages = list_create();
+
+    SnapshotBuildContext context{address_space, snapshot->pages};
+
+    arch_virtual_for_each_present_page(
+        address_space,
+        USER_MEMORY_START,
+        USER_MEMORY_END,
+        record_and_mark_page_callback,
+        &context);
+
+    return snapshot;
+}
+
+static void destroy_snapshot_page_entry(void *raw_entry)
+{
+    auto entry = reinterpret_cast<SnapshotPageEntry *>(raw_entry);
+
+    // Same call physical_free() always was -- this just happens to be a
+    // single-page range with no virtual mapping behind it from this
+    // snapshot's point of view. Decrements the frame's refcount, and
+    // actually frees it if this was the last reference.
+    physical_free(MemoryRange{entry->physical_address, ARCH_PAGE_SIZE});
+
+    delete entry;
+}
+
+void snapshot_destroy(Snapshot *snapshot)
+{
+    list_destroy_with_callback(snapshot->pages, destroy_snapshot_page_entry);
+
+    delete snapshot;
+}
