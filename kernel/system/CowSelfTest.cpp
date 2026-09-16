@@ -23,37 +23,24 @@ void cow_self_test()
 
     uintptr_t original_physical = arch_virtual_to_physical(address_space, test_address);
 
-    // Simulate "a snapshot exists": something else now also references
-    // this frame, same as the real snapshot mechanism will do later.
     physical_page_retain(original_physical);
     assert(SUCCESS == arch_virtual_protect(address_space, test_address, MEMORY_READONLY));
     assert(physical_page_refcount(original_physical) == 2);
 
-    // This is the exact call the fault handler makes. Called directly
-    // here rather than by actually triggering a hardware fault, since the
-    // fault handler only attempts this for userspace (ring 3) faults --
-    // this test runs in kernel context, before any user task exists yet.
     assert(memory_handle_cow_fault(address_space, test_address));
 
     uintptr_t new_physical = arch_virtual_to_physical(address_space, test_address);
-    assert(new_physical != original_physical); // a real, distinct copy was made
+    assert(new_physical != original_physical);
 
-    // The live mapping is writable again, with its own private copy.
     *((volatile uint32_t *)test_address) = 0xBBBBBBBB;
     assert(*((volatile uint32_t *)test_address) == 0xBBBBBBBB);
 
-    // The ORIGINAL frame must be untouched -- read it back through a
-    // temporary mapping, since nothing points at it directly anymore
-    // after the remap above.
     MemoryRange original_range{original_physical, ARCH_PAGE_SIZE};
     MemoryRange scratch = arch_virtual_alloc(address_space, original_range, MEMORY_NONE);
     uint32_t original_value = *((volatile uint32_t *)scratch.base());
     arch_virtual_free(address_space, scratch);
 
-    assert(original_value == 0xAAAAAAAA); // the "snapshot" is intact, unmodified
-
-    // The live mapping released its reference; only the simulated
-    // snapshot's reference remains.
+    assert(original_value == 0xAAAAAAAA);
     assert(physical_page_refcount(original_physical) == 1);
 
     logger_info("[COW self-test] shared-page copy: PASS");
@@ -65,15 +52,13 @@ void cow_self_test()
 
     uintptr_t physical_2 = arch_virtual_to_physical(address_space, test_address_2);
 
-    // Marked read-only, but nothing else was ever made to reference it --
-    // refcount is still 1, same as any normal, non-shared page.
     assert(SUCCESS == arch_virtual_protect(address_space, test_address_2, MEMORY_READONLY));
     assert(physical_page_refcount(physical_2) == 1);
 
     assert(memory_handle_cow_fault(address_space, test_address_2));
 
     uintptr_t physical_2_after = arch_virtual_to_physical(address_space, test_address_2);
-    assert(physical_2_after == physical_2); // no copy -- same frame, made writable in place
+    assert(physical_2_after == physical_2);
 
     *((volatile uint32_t *)test_address_2) = 0xCCCCCCCC;
     assert(*((volatile uint32_t *)test_address_2) == 0xCCCCCCCC);
@@ -82,11 +67,6 @@ void cow_self_test()
 
     /* --- Test 3: whole-address-space marking (the page-table walker) --- */
 
-    // Allocate USER-flagged pages: arch_virtual_alloc() picks the search
-    // range from the flags, not from which address space object is
-    // passed in, so these land in the user address range that
-    // memory_mark_address_space_cow() actually walks, even though this
-    // is still, structurally, the kernel's own address space.
     uintptr_t user_page_1 = 0, user_page_2 = 0;
     assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &user_page_1));
     assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &user_page_2));
@@ -98,18 +78,11 @@ void cow_self_test()
     uintptr_t user_physical_2 = arch_virtual_to_physical(address_space, user_page_2);
 
     size_t marked = memory_mark_address_space_cow(address_space);
-
-    // At least the two pages just allocated should have been marked --
-    // ">=" rather than "==" since other user-range pages may already
-    // exist at this point in boot for unrelated reasons, and this test
-    // doesn't need to know about those to check its own two pages worked.
     assert(marked >= 2);
 
     assert(physical_page_refcount(user_physical_1) == 2);
     assert(physical_page_refcount(user_physical_2) == 2);
 
-    // Both should now be read-only -- confirm by resolving a COW fault on
-    // each and checking a real copy happens, same shape as Test 1.
     assert(memory_handle_cow_fault(address_space, user_page_1));
     assert(memory_handle_cow_fault(address_space, user_page_2));
 
@@ -123,10 +96,62 @@ void cow_self_test()
 
     logger_info("[COW self-test] whole-address-space marking: PASS");
 
+    /* --- Test 4: snapshot_take()/snapshot_destroy() record + release --- */
+
+    uintptr_t snap_page = 0;
+    assert(SUCCESS == memory_alloc(address_space, ARCH_PAGE_SIZE, MEMORY_USER | MEMORY_CLEAR, &snap_page));
+    *((volatile uint32_t *)snap_page) = 0x55555555;
+
+    uintptr_t snap_physical = arch_virtual_to_physical(address_space, snap_page);
+
+    Snapshot *snapshot = snapshot_take(address_space);
+    assert(snapshot != nullptr);
+    assert(snapshot->id > 0);
+
+    // Confirm our page is actually recorded, with the correct physical
+    // address -- not just that SOME pages got marked.
+    bool found = false;
+    list_foreach(SnapshotPageEntry, entry, snapshot->pages)
+    {
+        if (entry->virtual_address == snap_page)
+        {
+            assert(entry->physical_address == snap_physical);
+            found = true;
+        }
+    }
+    assert(found);
+
+    assert(physical_page_refcount(snap_physical) == 2); // live mapping + this snapshot's reference
+
+    // Diverge: write through the live mapping, triggering COW.
+    assert(memory_handle_cow_fault(address_space, snap_page));
+    *((volatile uint32_t *)snap_page) = 0x66666666;
+    assert(*((volatile uint32_t *)snap_page) == 0x66666666);
+
+    // The snapshot's OWN recorded frame must still hold the original
+    // value, untouched by the write above.
+    MemoryRange snap_original_range{snap_physical, ARCH_PAGE_SIZE};
+    MemoryRange snap_scratch = arch_virtual_alloc(address_space, snap_original_range, MEMORY_NONE);
+    uint32_t snap_original_value = *((volatile uint32_t *)snap_scratch.base());
+    arch_virtual_free(address_space, snap_scratch);
+    assert(snap_original_value == 0x55555555);
+
+    assert(physical_page_refcount(snap_physical) == 1); // live mapping released; snapshot's reference remains
+
+    snapshot_destroy(snapshot);
+
+    // Reading refcount on a now-freed frame is only meaningful here, to
+    // confirm destroy actually released it -- not a generally supported
+    // thing to query afterward.
+    assert(physical_page_refcount(snap_physical) == 0);
+
+    logger_info("[COW self-test] snapshot_take/snapshot_destroy: PASS");
+
     memory_free(address_space, MemoryRange{test_address, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{test_address_2, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{user_page_1, ARCH_PAGE_SIZE});
     memory_free(address_space, MemoryRange{user_page_2, ARCH_PAGE_SIZE});
+    memory_free(address_space, MemoryRange{snap_page, ARCH_PAGE_SIZE});
 
     logger_info("[COW self-test] ALL TESTS PASSED");
 }
