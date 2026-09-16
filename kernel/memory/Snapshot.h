@@ -47,6 +47,30 @@ Snapshot *snapshot_take(void *address_space);
 // mapping (or another snapshot) still does, it survives.
 void snapshot_destroy(Snapshot *snapshot);
 
+// Restores address_space's user memory to exactly the state recorded in
+// snapshot. Three things happen:
+//
+//   1. Every page the snapshot recorded is remapped back to the physical
+//      frame it pointed at then -- read-only, so the restored state is
+//      itself COW-protected and the snapshot stays valid for a future
+//      restore. Where the live mapping had diverged (COW gave it a
+//      private copy), its reference on that private copy is released.
+//   2. Pages that exist live but are ABSENT from the snapshot (allocated
+//      after it was taken) are unmapped and their frames released --
+//      otherwise the restored state would carry leftovers from a future
+//      that no longer happened.
+//   3. The snapshot takes a fresh reference on every frame it restored,
+//      so it remains independently valid afterward and can be restored
+//      again later.
+//
+// The snapshot is NOT consumed -- call snapshot_destroy() separately when
+// it's genuinely no longer wanted.
+//
+// Only touches memory. Kernel-side state (the task table, open handles,
+// IPC connections, timers) is untouched, so this alone is not yet a full
+// "revert the system" -- that's the next piece of work.
+void snapshot_restore(Snapshot *snapshot);
+
 // Marks every currently-writable, present page in address_space's user
 // region as copy-on-write: retains an extra reference
 // (physical_page_retain()) on each physical frame and marks writable
